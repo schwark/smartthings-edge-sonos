@@ -1,16 +1,16 @@
 local socket = require('socket')
 local cosock = require "cosock"
 local http = cosock.asyncify "socket.http"
+local http = require("socket.http")
+local utils = require("st.utils")
 local ltn12 = require('ltn12')
 -- XML modules
 local xml2lua = require "xml2lua"
 local xml_handler = require "xmlhandler.tree"
 
---local utils = require("st.utils")
 local log = require "log"
 local math = require ('math')
 local config = require('config')
-local utils = require("st.utils")
 
 local function interp(s, tab)
     return (s:gsub('%%%((%a%w*)%)([-0-9%.]*[cdeEfgGiouxXsq])',
@@ -21,15 +21,28 @@ getmetatable("").__mod = interp
 
 
 local types = {
-    ['urn:schemas-upnp-org:service:ZoneGroupTopology:1'] = {
-        control = 'ZoneGroupTopology/Control',
+    ['urn:schemas-upnp-org:service:RenderingControl:1'] = {
+        control = '/MediaRenderer/RenderingControl/Control',
         commands = {
-            GetZoneGroupState = {}
+            GetVolume = {params = {InstanceID = 0, Channel = "Master"}},
+            GetMute = {params = {InstanceID = 0, Channel = "Master"}},
+            SetVolume = {params = {InstanceID = 0, Channel = "Master", DesiredVolume = 50}},
+            SetMute = {params = {InstanceID = 0, Channel = "Master", DesiredMute = true}},
+        }
+    },
+    ['urn:schemas-upnp-org:service:ZoneGroupTopology:1'] = {
+        control = '/ZoneGroupTopology/Control',
+        commands = {
+            GetZoneGroupState = {},
+            GetZoneGroupAttributes = {}
         }
     },
     ['urn:schemas-upnp-org:service:AVTransport:1'] = {
-        control = 'MediaRenderer/AVTransport/Control',
+        control = '/MediaRenderer/AVTransport/Control',
         commands = {
+            SetAVTransportURI = {params = {InstanceID = 0, CurrentURI = nil, CurrentURIMetaData= nil}},
+            GetMediaInfo = {params = {InstanceID = 0}},
+            GetPositionInfo = {params = {InstanceID = 0}},
             Play = {params = {InstanceID = 0, Speed = 1}},
             Pause = {params = {InstanceID = 0}},
             Stop = {params = {InstanceID = 0}},
@@ -37,6 +50,12 @@ local types = {
             Previous = {params = {InstanceID = 0}}
         }
     },
+    ['urn:schemas-sonos-com:service:Queue:1'] = {
+        control = '/MediaRenderer/Queue/Control',
+        commands = {
+
+        }
+    }
 }
 
 
@@ -160,23 +179,29 @@ local function toXml(params)
     return result
 end
 
-function M:cmd(ip, command, params)
-    local res = {}
-    local url = 'http://'..ip..':1400/'
-    local cmd = assert(get_command_meta(command))
-
-    url = url..cmd.control
-    local cparams = {cmd = cmd.command, type = cmd.type, paramxml = ""}
+local function get_param_xml(cmd, params)
+    local paramXml = ""
     local parameters = nil
     if cmd.params then
         parameters = utils.deep_copy(cmd.params)
         for key, value in pairs(parameters) do
-            if not value or "" == value then
+            if not value or "" == value or params[key] then
                 parameters[key] = params and params[key] and api_safe(params[key]) or ""
             end
         end
-        cparams.paramxml = toXml(parameters)
+        paramXml = toXml(parameters)
     end
+    return paramXml
+end
+
+function M:cmd(ip, command, params)
+    local res = {}
+    local url = 'http://'..ip..':1400'
+    local cmd = assert(get_command_meta(command))
+
+    url = url..cmd.control
+    local cparams = {cmd = cmd.command, type = cmd.type, paramxml = ""}
+    cparams.paramXml = get_param_xml(cmd, params)
     local body = get_request_body(cparams)
     local headers = {
         Host = ip..':1400',

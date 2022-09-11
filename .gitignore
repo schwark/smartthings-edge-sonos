@@ -41,4 +41,6 @@ luac.out
 
 *.xml
 **/upd
-test.lua
+**/test.lua
+**/log.lua
+**/st
