@@ -1,0 +1,16 @@
+name: Sonos.Speaker.LAN.v1
+components:
+- id: main
+  capabilities:
+  - id: audioMute
+    version: 1
+  - id: audioStream
+    version: 1
+  - id: audioNotification
+    version: 1
+  - id: audioVolume
+    version: 1
+  - id: refresh
+    version: 1
+  categories:
+  - name: NetworkAudio

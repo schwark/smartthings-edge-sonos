@@ -1,0 +1,5 @@
+name: "Sonos LAN"
+packageKey: "Sonos LAN"
+permissions:
+  lan: {}
+  discovery: {}
