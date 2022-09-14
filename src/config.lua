@@ -9,7 +9,8 @@ config.SCHEDULE_PERIOD=15
 config.MANUFACTURER='Sonos' 
 config.UPDATE_MAX_FREQUENCY = 10
 
-config.URN='urn:schemas-upnp-org:device:ZonePlayer:1'
+--config.URN='urn:schemas-upnp-org:device:ZonePlayer:1'
+config.URN='urn:smartspeaker-audio:service:SpeakerGroup:1'
 -- SSDP Config
 config.MC_ADDRESS='239.255.255.250'
 config.MC_PORT=1900

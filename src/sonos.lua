@@ -19,8 +19,21 @@ local function interp(s, tab)
 end
 getmetatable("").__mod = interp
 
+local function isRadio(uri)
+    return uri:match('x-sonosapi-stream:') or
+      uri:match('x-sonosapi-radio:') or
+      uri:match('pndrradio:') or
+      uri:match('x-sonosapi-hls:') or
+      uri:match('x-sonosprog-http:');
+end
 
 local types = {
+    ['urn:schemas-upnp-org:service:ContentDirectory:1'] = {
+        control = '/MediaServer/ContentDirectory/Control',
+        commands = {
+            Browse = {params = {ObjectID = "", BrowseFlag = "BrowseDirectChildren", Filter = "*", StartingIndex = 0, RequestedCount = 100, SortCriteria=""}}
+        }
+    },
     ['urn:schemas-upnp-org:service:RenderingControl:1'] = {
         control = '/MediaRenderer/RenderingControl/Control',
         commands = {
@@ -59,6 +72,17 @@ local types = {
 }
 
 
+local function unescape(str)
+    str = string.gsub( str, '&lt;', '<' )
+    str = string.gsub( str, '&gt;', '>' )
+    str = string.gsub( str, '&quot;', '"' )
+    str = string.gsub( str, '&apos;', "'" )
+    str = string.gsub( str, '&#(%d+);', function(n) return string.char(n) end )
+    str = string.gsub( str, '&#x(%d+);', function(n) return string.char(tonumber(n,16)) end )
+    str = string.gsub( str, '&amp;', '&' ) -- Be sure to do this after all others
+    return str
+end
+
 local function get_command_meta(command)
     local result = nil
     for type, meta in pairs(types) do
@@ -79,6 +103,9 @@ local M = {}; M.__index = M
 
 local function constructor(self,o)
     o = o or {}
+    o.players = nil
+    o.favorites = nil
+    o.playlists = nil
     setmetatable(o, M)
     return o
 end
@@ -131,18 +158,25 @@ function M:find_devices()
     local err
     local result = {}
     repeat
+        log.debug("discovering sonos speakers...")
         local res, ip = upnp:receivefrom()
         if nil == res then
             err = ip
         else
             res = parse_ssdp(res)
-            log.info("speaker at "..ip.." and xml at "..res.location)
-            table.insert(result, {ip=ip, meta=get_config(res.location)})
+            log.debug("st is "..res.st)
+            if(res and res.st and config.URN == res.st) then
+                log.info("speaker at "..ip.." and xml at "..res.location)
+                local meta = get_config(res.location)
+                log.debug("meta for "..ip.." is "..utils.stringify_table(meta))
+                table.insert(result, {ip=ip, meta=meta})                    
+            end
         end
     until err
 
     -- close udp socket
     upnp:close()
+    self.players = result
     return next(result) and result or nil
 end
   
@@ -181,9 +215,9 @@ end
 
 local function get_param_xml(cmd, params)
     local paramXml = ""
-    local parameters = nil
     if cmd.params then
-        parameters = utils.deep_copy(cmd.params)
+        log.info(utils.stringify_table(cmd.params))
+        local parameters = utils.deep_copy(cmd.params)
         for key, value in pairs(parameters) do
             if not value or "" == value or params[key] then
                 parameters[key] = params and params[key] and api_safe(params[key]) or ""
@@ -201,7 +235,7 @@ function M:cmd(ip, command, params)
 
     url = url..cmd.control
     local cparams = {cmd = cmd.command, type = cmd.type, paramxml = ""}
-    cparams.paramXml = get_param_xml(cmd, params)
+    cparams.paramxml = get_param_xml(cmd, params)
     local body = get_request_body(cparams)
     local headers = {
         Host = ip..':1400',
@@ -228,7 +262,17 @@ function M:cmd(ip, command, params)
         local xml_parser = xml2lua.parser(xmlres)
         xml_parser:parse(table.concat(res))
         result = xmlres.root['s:Envelope']['s:Body']['u:'..cmd.command..'Response']
-        log.debug(utils.stringify_table(result))     
+        if params and params.parse and result[params.parse] then
+            local decoded = unescape(result[params.parse])
+            --log.info('need to parse..'..decoded)
+            local result_handler = xml_handler:new()
+            local result_parser = xml2lua.parser(result_handler)
+            result_parser:parse(decoded)
+            if result_handler.root then
+                result[params.parse] = result_handler.root
+            end
+        end
+        --log.debug(utils.stringify_table(result))     
     else
         result = status
         log.error(status)
@@ -237,5 +281,45 @@ function M:cmd(ip, command, params)
 
     return result
 end
+
+function M:get_players()
+    if not self.players then
+        self:discover()
+    end
+    return self.players
+end
+
+function M:any_player() 
+    local players = self:get_players()
+
+    return players and players[1] or nil 
+end
+
+function M:browse(term, ip)
+    local player = self:any_player()
+    local ip = ip or (player and player.ip)
+    local didl = self:cmd(ip,'Browse', {ObjectID = term, parse = 'Result'})
+    local result = nil
+    log.debug(utils.stringify_table(didl))
+    local list = didl and didl.Result['DIDL-Lite'] and didl.Result['DIDL-Lite'] and (didl.Result['DIDL-Lite'].item or didl.Result['DIDL-Lite'].container)
+    if list then
+        result = {}
+        for i, item in ipairs(list) do
+            table.insert(result, {name=item['dc:title'], metadata=item['r:resMD'], art=(type(item['upnp:albumArtURI']) == "table" and item['upnp:albumArtURI'][1] or item['upnp:albumArtURI']), uri=item.res[1], desc=item['r:description']})
+        end
+    end
+    log.debug(result and utils.stringify_table(result) or "nil")
+    return result
+end
+
+function M:find_favorites(ip)
+    return self:browse('FV:2', ip)
+end
+
+function M:find_playlists(ip)
+    return self:browse('SQ:', ip)
+end
+
+
 
 return M
