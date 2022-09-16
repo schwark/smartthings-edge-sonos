@@ -54,6 +54,7 @@ local types = {
         control = '/MediaRenderer/AVTransport/Control',
         commands = {
             SetAVTransportURI = {params = {InstanceID = 0, CurrentURI = nil, CurrentURIMetaData= nil}},
+            AddURIToQueue = {params = {InstanceID = 0, EnqueuedURI = nil, EnqueuedURIMetaData= nil, DesiredFirstTrackNumberEnqueued=0, EnqueueAsNext=false}},
             GetMediaInfo = {params = {InstanceID = 0}},
             GetPositionInfo = {params = {InstanceID = 0}},
             Play = {params = {InstanceID = 0, Speed = 1}},
@@ -72,14 +73,23 @@ local types = {
 }
 
 
-local function unescape(str)
-    str = string.gsub( str, '&lt;', '<' )
-    str = string.gsub( str, '&gt;', '>' )
-    str = string.gsub( str, '&quot;', '"' )
-    str = string.gsub( str, '&apos;', "'" )
-    str = string.gsub( str, '&#(%d+);', function(n) return string.char(n) end )
-    str = string.gsub( str, '&#x(%d+);', function(n) return string.char(tonumber(n,16)) end )
-    str = string.gsub( str, '&amp;', '&' ) -- Be sure to do this after all others
+local function xml_decode(str)
+    str = str:gsub('&lt;', '<' )
+    str = str:gsub('&gt;', '>' )
+    str = str:gsub('&quot;', '"' )
+    str = str:gsub('&apos;', "'" )
+    str = str:gsub('&#(%d+);', function(n) return string.char(n) end )
+    str = str:gsub('&#x(%d+);', function(n) return string.char(tonumber(n,16)) end )
+    str = str:gsub('&amp;', '&' ) -- Be sure to do this after all others
+    return str
+end
+
+local function xml_encode(str)
+    str = str:gsub('&', '&amp;') -- Be sure to do this before all others
+    str = str:gsub( '<' ,'&lt;')
+    str = str:gsub( '>' ,'&gt;')
+    str = str:gsub( '"' ,'&quot;')
+    str = str:gsub( "'" ,'&apos;')
     return str
 end
 
@@ -166,10 +176,13 @@ function M:find_devices()
             res = parse_ssdp(res)
             log.debug("st is "..res.st)
             if(res and res.st and config.URN == res.st) then
-                log.info("speaker at "..ip.." and xml at "..res.location)
+                log.debug("found "..ip.." and xml at "..res.location)
                 local meta = get_config(res.location)
                 log.debug("meta for "..ip.." is "..utils.stringify_table(meta))
-                table.insert(result, {ip=ip, meta=meta})                    
+                if meta and meta.friendlyName and "" ~= meta.friendlyName then
+                    log.info("sonos speaker "..meta.friendlyName.." at "..ip)
+                    table.insert(result, {ip=ip, id=meta.UDN, name=meta.friendlyName})                    
+                end
             end
         end
     until err
@@ -263,7 +276,7 @@ function M:cmd(ip, command, params)
         xml_parser:parse(table.concat(res))
         result = xmlres.root['s:Envelope']['s:Body']['u:'..cmd.command..'Response']
         if params and params.parse and result[params.parse] then
-            local decoded = unescape(result[params.parse])
+            local decoded = xml_decode(result[params.parse])
             --log.info('need to parse..'..decoded)
             local result_handler = xml_handler:new()
             local result_parser = xml2lua.parser(result_handler)
@@ -289,15 +302,25 @@ function M:get_players()
     return self.players
 end
 
-function M:any_player() 
+function M:get_player(name)
+    if name and name:match('%d+%.%d+%.%d+%.%d+') then -- is an ip address
+        return {ip=name}
+    end
     local players = self:get_players()
-
-    return players and players[1] or nil 
+    if players then
+        if not name or "" == name then -- any player will do
+            return players[1]
+        end
+        for i, player in ipairs(players) do
+            if player.name:lower() == name:lower() then return player end
+        end
+    end
+    return nil
 end
 
-function M:browse(term, ip)
-    local player = self:any_player()
-    local ip = ip or (player and player.ip)
+function M:browse(term, name)
+    local player = assert(self:get_player(name))
+    local ip = assert(player.ip)
     local didl = self:cmd(ip,'Browse', {ObjectID = term, parse = 'Result'})
     local result = nil
     log.debug(utils.stringify_table(didl))
@@ -312,14 +335,43 @@ function M:browse(term, ip)
     return result
 end
 
-function M:find_favorites(ip)
-    return self:browse('FV:2', ip)
+function M:find_favorites(name)
+    self.favorites = self:browse('FV:2', name)
+    return self.favorites
 end
 
-function M:find_playlists(ip)
-    return self:browse('SQ:', ip)
+function M:find_playlists(name)
+    self.playlists = self:browse('SQ:', name)
+    return self.playlists
 end
 
+function M:playback_cmd(cmd, name)
+    local player = assert(self:get_player(name))
+    local ip = assert(player.ip)
+    return self:cmd(ip, cmd)
+end
 
+function M:play(name)
+    return self:playback_cmd('Play', name)
+end
+
+function M:stop(name)
+    return self:playback_cmd('Stop', name)
+end
+
+function M:pause(name)
+    return self:playback_cmd('Pause', name)
+end
+
+function M:prev(name)
+    return self:playback_cmd('Previous', name)
+end
+
+function M:next(name)
+    return self:playback_cmd('Next', name)
+end
+
+function M:set_uri(uri, name)
+end
 
 return M
