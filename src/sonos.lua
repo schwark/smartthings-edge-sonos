@@ -12,6 +12,48 @@ local log = require "log"
 local math = require ('math')
 local config = require('config')
 
+
+local errors = {
+        ["400"] = "Bad request" ,
+        ["401"] = "Invalid action" ,
+        ["402"] = "Invalid args" ,
+        ["404"] = "Invalid var" ,
+        ["412"] = "Precondition failed" ,
+        ["501"] = "Action failed" ,
+        ["600"] = "Argument value invalid" ,
+        ["601"] = "Argument value out of range" ,
+        ["602"] = "Optional action not implemented" ,
+        ["603"] = "Out of memory" ,
+        ["604"] = "Human intervention required" ,
+        ["605"] = "String argument too long" ,
+        ["606"] = "Action not authorized" ,
+        ["607"] = "Signature failure" ,
+        ["608"] = "Signature missing" ,
+        ["609"] = "Not encrypted" ,
+        ["610"] = "Invalid sequence" ,
+        ["611"] = "Invalid control URL" ,
+        ["612"] = "No such session", 
+        ["701"] = "No such object" ,
+        ["702"] = "Invalid CurrentTagValue" ,
+        ["703"] = "Invalid NewTagValue" ,
+        ["704"] = "Required tag" ,
+        ["705"] = "Read-only tag" ,
+        ["706"] = "Parameter mismatch" ,
+        ["708"] = "Invalid search criteria" ,
+        ["709"] = "Invalid sort criteria" ,
+        ["710"] = "No such container" ,
+        ["711"] = "Restricted object" ,
+        ["712"] = "Bad metadata" ,
+        ["713"] = "Restricted parent object" ,
+        ["714"] = "No such source resource" ,
+        ["715"] = "Resource access denied" ,
+        ["716"] = "Transfer busy" ,
+        ["717"] = "No such file transfer" ,
+        ["718"] = "No such destination resource" ,
+        ["719"] = "Destination resource access denied" ,
+        ["720"] = "Cannot process the request" 
+}
+
 local function interp(s, tab)
     return (s:gsub('%%%((%a%w*)%)([-0-9%.]*[cdeEfgGiouxXsq])',
               function(k, fmt) return tab[k] and ("%"..fmt):format(tab[k]) or
@@ -53,10 +95,11 @@ local types = {
     ['urn:schemas-upnp-org:service:AVTransport:1'] = {
         control = '/MediaRenderer/AVTransport/Control',
         commands = {
-            SetAVTransportURI = {params = {InstanceID = 0, CurrentURI = nil, CurrentURIMetaData= nil}},
-            AddURIToQueue = {params = {InstanceID = 0, EnqueuedURI = nil, EnqueuedURIMetaData= nil, DesiredFirstTrackNumberEnqueued=0, EnqueueAsNext=false}},
+            SetAVTransportURI = {params = {InstanceID = 0, CurrentURI = "", CurrentURIMetaData= ""}},
+            AddURIToQueue = {params = {InstanceID = 0, EnqueuedURI = "", EnqueuedURIMetaData= "", DesiredFirstTrackNumberEnqueued=0, EnqueueAsNext=false}},
             GetMediaInfo = {params = {InstanceID = 0}},
             GetPositionInfo = {params = {InstanceID = 0}},
+            SetPlayMode = {params = {InstanceID = 0, NewPlayMode = ""}}, -- NORMAL / REPEAT_ALL / REPEAT_ONE / SHUFFLE_NOREPEAT / SHUFFLE / SHUFFLE_REPEAT_ONE
             Play = {params = {InstanceID = 0, Speed = 1}},
             Pause = {params = {InstanceID = 0}},
             Stop = {params = {InstanceID = 0}},
@@ -85,11 +128,15 @@ local function xml_decode(str)
 end
 
 local function xml_encode(str)
+    if type(str) == "boolean" then
+        str = str and 1 or 0
+    end
+    str = tostring(str)
     str = str:gsub('&', '&amp;') -- Be sure to do this before all others
-    str = str:gsub( '<' ,'&lt;')
-    str = str:gsub( '>' ,'&gt;')
-    str = str:gsub( '"' ,'&quot;')
-    str = str:gsub( "'" ,'&apos;')
+    str = str:gsub('<' ,'&lt;')
+    str = str:gsub('>' ,'&gt;')
+    str = str:gsub('"' ,'&quot;')
+    str = str:gsub("'" ,'&apos;')
     return str
 end
 
@@ -122,8 +169,9 @@ end
 setmetatable(M, {__call = constructor})
 
 
-local function get_config(url)
+local function get_config(ip)
     local res = {}
+    local url = 'http://'..ip..':1400/xml/group_description.xml'
     local _, status = http.request({
       url=url,
       sink=ltn12.sink.table(res)
@@ -146,6 +194,16 @@ local function parse_ssdp(data)
       res[k:lower()] = v
     end
     return res
+end
+
+function M:init_player(ip)
+    local meta = get_config(ip)
+    log.debug("meta for "..ip.." is "..utils.stringify_table(meta))
+    if meta and meta.friendlyName and "" ~= meta.friendlyName then
+        log.info("sonos speaker "..meta.friendlyName.." at "..ip)
+        return {ip=ip, id=meta.UDN:gsub('uuid:',''), name=meta.friendlyName}                   
+    end
+    return nil
 end
 
 -- This function enables a UDP
@@ -176,13 +234,8 @@ function M:find_devices()
             res = parse_ssdp(res)
             log.debug("st is "..res.st)
             if(res and res.st and config.URN == res.st) then
-                log.debug("found "..ip.." and xml at "..res.location)
-                local meta = get_config(res.location)
-                log.debug("meta for "..ip.." is "..utils.stringify_table(meta))
-                if meta and meta.friendlyName and "" ~= meta.friendlyName then
-                    log.info("sonos speaker "..meta.friendlyName.." at "..ip)
-                    table.insert(result, {ip=ip, id=meta.UDN, name=meta.friendlyName})                    
-                end
+                local player = self:init_player(ip)
+                if player then table.insert(result, player) end
             end
         end
     until err
@@ -210,18 +263,11 @@ local function get_request_body(command)
     return result
 end
 
-local function api_safe(val)
-    local result = val
-    if type(val) == "boolean" then
-        result = val and 1 or 0
-    end
-    return result
-end
-
 local function toXml(params)
     local result = ""
     for key, value in pairs(params) do
-        result = result .. '<%(key)s>%(value)s</%(key)s>' % {key = key, value = value}
+        local encoded = xml_encode(value)
+        result = result .. '<%(key)s>%(value)s</%(key)s>' % {key = key, value = encoded}
     end
     return result
 end
@@ -229,11 +275,12 @@ end
 local function get_param_xml(cmd, params)
     local paramXml = ""
     if cmd.params then
-        log.info(utils.stringify_table(cmd.params))
+        --log.debug(utils.stringify_table(cmd.params))
+        --log.debug(utils.stringify_table(params))
         local parameters = utils.deep_copy(cmd.params)
         for key, value in pairs(parameters) do
-            if not value or "" == value or params[key] then
-                parameters[key] = params and params[key] and api_safe(params[key]) or ""
+            if not value or "" == value or (params and params[key]) then
+                parameters[key] = params and params[key] or ""
             end
         end
         paramXml = toXml(parameters)
@@ -289,7 +336,15 @@ function M:cmd(ip, command, params)
     else
         result = status
         log.error(status)
-        log.error(table.concat(res))
+        if 500 == status then
+            local xmlres = xml_handler:new()
+            local xml_parser = xml2lua.parser(xmlres)
+            xml_parser:parse(table.concat(res))
+            result = xmlres.root['s:Envelope']['s:Body']['s:Fault']['detail']['UPnPError']['errorCode']
+            log.error("error code "..(result or "nil").." "..(result and errors[result] or "nil"))
+        else 
+            log.error(table.concat(res))
+        end
     end
 
     return result
@@ -304,7 +359,7 @@ end
 
 function M:get_player(name)
     if name and name:match('%d+%.%d+%.%d+%.%d+') then -- is an ip address
-        return {ip=name}
+        return self:init_player(name)
     end
     local players = self:get_players()
     if players then
@@ -351,6 +406,12 @@ function M:playback_cmd(cmd, name)
     return self:cmd(ip, cmd)
 end
 
+function M:mute_cmd(state, name)
+    local player = assert(self:get_player(name))
+    local ip = assert(player.ip)
+    return self:cmd(ip, 'SetMute', {DesiredMute = state and true or false})
+end
+
 function M:play(name)
     return self:playback_cmd('Play', name)
 end
@@ -371,7 +432,70 @@ function M:next(name)
     return self:playback_cmd('Next', name)
 end
 
-function M:set_uri(uri, name)
+function M:mute(name)
+    return self:mute_cmd(true, name)
+end
+
+function M:unmute(name)
+    return self:mute_cmd(false, name)
+end
+
+function M:set_volume(name, volume) -- number between 0 and 100
+    local player = assert(self:get_player(name))
+    local ip = assert(player.ip)
+    assert(volume)
+    return self:cmd(ip, 'SetVolume', {DesiredVolume = volume})
+end
+
+function M:set_uri(uri, metadata, name)
+    local player = assert(self:get_player(name))
+    local ip = assert(player.ip)
+    return self:cmd(ip, 'SetAVTransportURI', {CurrentURI = uri, CurrentURIMetaData = (metadata or "")})
+end
+
+function M:add_to_queue(uri, metadata, name)
+    local player = assert(self:get_player(name))
+    local ip = assert(player.ip)
+    log.info("adding to queue "..uri)
+    return self:cmd(ip, 'AddURIToQueue', {EnqueuedURI = uri, EnqueuedURIMetaData = (metadata or "")})
+end
+
+function M:set_media(media, name)
+    if isRadio(media.uri) then
+        return self:set_uri(media.uri, media.metadata)
+    end
+    local player = assert(self:get_player(name))
+    local ip = assert(player.ip)
+    self:add_to_queue(media.uri, media.metadata, name)
+    self:set_uri("x-rincon-queue:"..player.id.."#0", "", name)
+end
+
+local function clean_name(name)
+    local result = name:lower()
+    result = result:gsub("[%s,'\"_%-]+","")
+    return result
+end
+
+function M:set_media_by_name(list, pname, name)
+    if not list or not(next(list)) then return end
+    local plist = nil
+    pname = clean_name(pname)
+    for i, item in ipairs(list) do
+        log.debug("searching "..item.name.." for "..pname)
+        if pname == clean_name(item.name) then
+            plist = item
+            break
+        end
+    end
+    return plist and self:set_media(plist, name) or nil
+end
+
+function M:set_playlist(pname, name)
+    return self:set_media_by_name(self.playlists, pname, name)
+end
+
+function M:set_favorite(fname, name)
+    return self:set_media_by_name(self.favorites, fname, name)
 end
 
 return M
