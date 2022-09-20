@@ -279,7 +279,7 @@ function M:cmd(player, command, params)
     local ip = assert(player.ip)
 
     local res = {}
-    local url = 'http://'..ip..':1400'
+    local url = 'http://'..ip..':'..SONOS_HTTP_PORT
     local cmd = assert(get_command_meta(command))
 
     url = url..cmd.control
