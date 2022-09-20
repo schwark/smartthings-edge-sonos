@@ -12,7 +12,9 @@ local log = require "log"
 local math = require ('math')
 local config = require('config')
 local xmlutil = require('xmlutil')
+local metadata = require('sonos.metadata')
 
+SONOS_HTTP_PORT = '1400'
 
 local errors = {
         ["400"] = "Bad request" ,
@@ -122,13 +124,6 @@ local types = {
     }
 }
 
-local function xml_metadata(metadata)
-    if metadata and type(metadata) == "table" then
-        metadata = xmlutil.tight_xml(xmlutil.toXml(metadata))
-    end
-    return metadata
-end
-
 local function get_command_meta(command)
     local result = nil
     for type, meta in pairs(types) do
@@ -160,7 +155,7 @@ setmetatable(M, {__call = constructor})
 
 local function get_config(ip)
     local res = {}
-    local url = 'http://'..ip..':1400/xml/group_description.xml'
+    local url = 'http://'..ip..':'..SONOS_HTTP_PORT..'/xml/group_description.xml'
     local _, status = http.request({
       url=url,
       sink=ltn12.sink.table(res)
@@ -371,17 +366,11 @@ function M:get_player(name)
 end
 
 function M:browse(player, term)
-    local didl = self:cmd(player,'Browse', {ObjectID = term, parse = 'Result'})
-    local result = nil
-    --log.debug(utils.stringify_table(didl))
-    local list = didl and didl.Result['DIDL-Lite'] and didl.Result['DIDL-Lite'] and (didl.Result['DIDL-Lite'].item or didl.Result['DIDL-Lite'].container)
-    if list then
-        result = {}
-        for i, item in ipairs(list) do
-            table.insert(result, {id = item._attr.id, name=item['dc:title'], metadata=item['r:resMD'], art=(type(item['upnp:albumArtURI']) == "table" and item['upnp:albumArtURI'][1] or item['upnp:albumArtURI']), uri=item.res[1], desc=item['r:description']})
-        end
-    end
-    --log.debug(result and utils.stringify_table(result) or "nil")
+    local didl = self:cmd(player,'Browse', {ObjectID = term})
+    if not didl or not didl['Result'] then return nil else didl = didl['Result'] end
+    --log.debug(didl)
+    local result = metadata.parse_didl(didl, player, SONOS_HTTP_PORT)
+    log.debug(result and utils.stringify_table(result) or "nil")
     return result
 end
 
@@ -436,10 +425,9 @@ function M:set_volume(player, volume) -- number between 0 and 100
     return self:cmd(player, 'SetVolume', {DesiredVolume = volume})
 end
 
-function M:set_uri(player, uri, metadata)
+function M:set_uri(player, uri, mdata)
     log.info("setting uri on "..player.." to "..uri)
-    metadata = xml_metadata(metadata)
-    return self:cmd(player, 'SetAVTransportURI', {CurrentURI = uri, CurrentURIMetaData = (metadata or "")})
+    return self:cmd(player, 'SetAVTransportURI', {CurrentURI = uri, CurrentURIMetaData = (mdata or "")})
 end
 
 function M:clear_queue(player)
@@ -447,10 +435,9 @@ function M:clear_queue(player)
     return self:cmd(player, 'RemoveAllTracksFromQueue')
 end
 
-function M:add_to_queue(player, uri, metadata, beginning)
+function M:add_to_queue(player, uri, mdata, beginning)
     log.info("adding to queue on "..player.." uri "..uri)
-    metadata = xml_metadata(metadata)
-    return self:cmd(player, 'AddURIToQueue', {EnqueuedURI = uri, EnqueuedURIMetaData = (metadata or ""), DesiredFirstTrackNumberEnqueued = (beginning and 1 or 0)})
+    return self:cmd(player, 'AddURIToQueue', {EnqueuedURI = uri, EnqueuedURIMetaData = (mdata or ""), DesiredFirstTrackNumberEnqueued = (beginning and 1 or 0)})
 end
 
 function M:set_media(player, media)
@@ -513,5 +500,22 @@ function M:set_media_by_id(player, pid, replace)
     return self:set_media(player, item)
 end
 
+function M:whats_playing(player)
+    local result = nil
+    log.info("getting current playing on "..player)
+    local response = self:cmd(player, 'GetPositionInfo')
+    if response then
+        log.debug(utils.stringify_table(response))
+        result = metadata.parse_didl(response.TrackMetaData, player, SONOS_HTTP_PORT)
+        if (result) then
+            result = result[1]
+            result.num = response.TrackNum
+            result.duration = response.TrackDuration
+            result.metadata = response.TrackMetaData
+            result.position = response.RelTime            
+        end
+    end
+    return result
+end
 
 return M
