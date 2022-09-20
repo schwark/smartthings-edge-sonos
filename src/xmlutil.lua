@@ -111,4 +111,36 @@ function M.toXml(tb, tableName, level)
   return table.concat(xmltb, '\n')
 end
 
+function M.xml_decode(str)
+    str = str:gsub('&lt;', '<' )
+    str = str:gsub('&gt;', '>' )
+    str = str:gsub('&quot;', '"' )
+    str = str:gsub('&apos;', "'" )
+    str = str:gsub('&#(%d+);', function(n) return string.char(n) end )
+    str = str:gsub('&#x(%d+);', function(n) return string.char(tonumber(n,16)) end )
+    str = str:gsub('&amp;', '&' ) -- Be sure to do this after all others
+    return str
+end
+
+function M.xml_encode(str)
+    if type(str) == "boolean" then
+        str = str and "1" or "0"
+    end
+    str = tostring(str)
+    str = str:gsub('&', '&amp;') -- Be sure to do this before all others
+    str = str:gsub('<' ,'&lt;')
+    str = str:gsub('>' ,'&gt;')
+    str = str:gsub('"' ,'&quot;')
+    str = str:gsub("'" ,'&apos;')
+    return str
+end
+
+function M.tight_xml(xml)
+    xml = xml:gsub('>%s+','>')
+    xml = xml:gsub('%s+<','<')
+    return xml
+end
+
+
+
 return M

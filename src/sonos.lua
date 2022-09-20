@@ -122,42 +122,9 @@ local types = {
     }
 }
 
-local function xml_decode(str)
-    str = str:gsub('&lt;', '<' )
-    str = str:gsub('&gt;', '>' )
-    str = str:gsub('&quot;', '"' )
-    str = str:gsub('&apos;', "'" )
-    str = str:gsub('&#(%d+);', function(n) return string.char(n) end )
-    str = str:gsub('&#x(%d+);', function(n) return string.char(tonumber(n,16)) end )
-    str = str:gsub('&amp;', '&' ) -- Be sure to do this after all others
-    return str
-end
-
-local function xml_encode(str)
-    if type(str) == "boolean" then
-        str = str and "1" or "0"
-    end
-    str = tostring(str)
-    str = str:gsub('&', '&amp;') -- Be sure to do this before all others
-    str = str:gsub('<' ,'&lt;')
-    str = str:gsub('>' ,'&gt;')
-    str = str:gsub('"' ,'&quot;')
-    str = str:gsub("'" ,'&apos;')
-    return str
-end
-
-local function tight_xml(xml)
-    xml = xml:gsub('^%s+','')
-    xml = xml:gsub('>%s+','>')
-    xml = xml:gsub('%s+<','<')
-    xml = xml:gsub('%s+$','')
-    log.debug(xml)
-    return xml
-end
-
 local function xml_metadata(metadata)
     if metadata and type(metadata) == "table" then
-        metadata = tight_xml(xmlutil.toXml(metadata))
+        metadata = xmlutil.tight_xml(xmlutil.toXml(metadata))
     end
     return metadata
 end
@@ -288,7 +255,7 @@ end
 local function toXml(params)
     local result = ""
     for key, value in pairs(params) do
-        local encoded = xml_encode(value)
+        local encoded = xmlutil.xml_encode(value)
         result = result .. '<%(key)s>%(value)s</%(key)s>' % {key = key, value = encoded}
     end
     return result
@@ -312,8 +279,8 @@ local function get_param_xml(cmd, params)
     return paramXml
 end
 
-function M:cmd(name, command, params)
-    local player = assert(self:get_player(name))
+function M:cmd(player, command, params)
+    local player = assert(self:get_player(player))
     local ip = assert(player.ip)
 
     local res = {}
@@ -330,7 +297,7 @@ function M:cmd(name, command, params)
         ['Content-Type'] = 'text/xml; charset="utf-8"',
         ['Content-Length'] = #body
     }
-    log.debug("executing on "..name.." command "..command.." with params "..(params and utils.stringify_table(params) or "none"))
+    log.debug("executing on "..player.name.." command "..command.." with params "..(params and utils.stringify_table(params) or "none"))
     --log.debug(utils.stringify_table(headers))
     log.debug(body)
 
@@ -350,7 +317,7 @@ function M:cmd(name, command, params)
         xml_parser:parse(table.concat(res))
         result = xmlres.root['s:Envelope']['s:Body']['u:'..cmd.command..'Response']
         if params and params.parse and result[params.parse] then
-            local decoded = xml_decode(result[params.parse])
+            local decoded = xmlutil.xml_decode(result[params.parse])
             --log.info('need to parse..'..decoded)
             local result_handler = xml_handler:new()
             local result_parser = xml2lua.parser(result_handler)
@@ -361,13 +328,13 @@ function M:cmd(name, command, params)
         end
         --log.debug(utils.stringify_table(result))     
     else
-        result = status
+        result = nil
         if 500 == status then
             local xmlres = xml_handler:new()
             local xml_parser = xml2lua.parser(xmlres)
             xml_parser:parse(table.concat(res))
-            result = xmlres.root['s:Envelope']['s:Body']['s:Fault']['detail']['UPnPError']['errorCode']
-            log.error("error code "..(result or "nil").." "..(result and errors[result] or "nil"))
+            local code = xmlres.root['s:Envelope']['s:Body']['s:Fault']['detail']['UPnPError']['errorCode']
+            log.error("error code "..(code or "nil").." "..(code and errors[code] or "nil"))
         else 
             log.error(table.concat(res))
         end
@@ -383,6 +350,10 @@ function M:get_players()
     return self.players
 end
 
+function M:any_player()
+    return self:get_player()
+end
+
 function M:get_player(name)
     if name and name:match('%d+%.%d+%.%d+%.%d+') then -- is an ip address
         return self:init_player(name)
@@ -392,104 +363,108 @@ function M:get_player(name)
         if not name or "" == name then -- any player will do
             return players[1]
         end
-        for i, player in ipairs(players) do
-            if player.name:lower() == name:lower() then return player end
+        for i, item in ipairs(players) do
+            if item.name:lower() == name:lower() then return item end
         end
     end
     return nil
 end
 
-function M:browse(term, name)
-    local didl = self:cmd(name,'Browse', {ObjectID = term, parse = 'Result'})
+function M:browse(player, term)
+    local didl = self:cmd(player,'Browse', {ObjectID = term, parse = 'Result'})
     local result = nil
     --log.debug(utils.stringify_table(didl))
     local list = didl and didl.Result['DIDL-Lite'] and didl.Result['DIDL-Lite'] and (didl.Result['DIDL-Lite'].item or didl.Result['DIDL-Lite'].container)
     if list then
         result = {}
         for i, item in ipairs(list) do
-            table.insert(result, {name=item['dc:title'], metadata=item['r:resMD'], art=(type(item['upnp:albumArtURI']) == "table" and item['upnp:albumArtURI'][1] or item['upnp:albumArtURI']), uri=item.res[1], desc=item['r:description']})
+            table.insert(result, {id = item._attr.id, name=item['dc:title'], metadata=item['r:resMD'], art=(type(item['upnp:albumArtURI']) == "table" and item['upnp:albumArtURI'][1] or item['upnp:albumArtURI']), uri=item.res[1], desc=item['r:description']})
         end
     end
     --log.debug(result and utils.stringify_table(result) or "nil")
     return result
 end
 
-function M:find_favorites(name)
-    self.favorites = self:browse('FV:2', name)
+function M:find_favorites(player)
+    self.favorites = self:browse(player, 'FV:2')
     return self.favorites
 end
 
-function M:find_playlists(name)
-    self.playlists = self:browse('SQ:', name)
+function M:find_playlists(player)
+    self.playlists = self:browse(player, 'SQ:')
     return self.playlists
 end
 
-function M:playback_cmd(cmd, name)
-    return self:cmd(name, cmd)
+function M:playback_cmd(player, cmd)
+    return self:cmd(player, cmd)
 end
 
-function M:mute_cmd(state, name)
-    return self:cmd(name, 'SetMute', {DesiredMute = state and true or false})
+function M:mute_cmd(player, state)
+    return self:cmd(player, 'SetMute', {DesiredMute = state and true or false})
 end
 
-function M:play(name)
-    return self:playback_cmd('Play', name)
+function M:play(player)
+    return self:playback_cmd(player, 'Play')
 end
 
-function M:stop(name)
-    return self:playback_cmd('Stop', name)
+function M:stop(player)
+    return self:playback_cmd(player, 'Stop')
 end
 
-function M:pause(name)
-    return self:playback_cmd('Pause', name)
+function M:pause(player)
+    return self:playback_cmd(player, 'Pause')
 end
 
-function M:prev(name)
-    return self:playback_cmd('Previous', name)
+function M:prev(player)
+    return self:playback_cmd(player, 'Previous')
 end
 
-function M:next(name)
-    return self:playback_cmd('Next', name)
+function M:next(player)
+    return self:playback_cmd(player, 'Next')
 end
 
-function M:mute(name)
-    return self:mute_cmd(true, name)
+function M:mute(player)
+    return self:mute_cmd(player, true)
 end
 
-function M:unmute(name)
-    return self:mute_cmd(false, name)
+function M:unmute(player)
+    return self:mute_cmd(player, false)
 end
 
-function M:set_volume(name, volume) -- number between 0 and 100
+function M:set_volume(player, volume) -- number between 0 and 100
     assert(volume)
-    return self:cmd(name, 'SetVolume', {DesiredVolume = volume})
+    return self:cmd(player, 'SetVolume', {DesiredVolume = volume})
 end
 
-function M:set_uri(uri, metadata, name)
-    log.info("setting uri on "..name.." to "..uri)
+function M:set_uri(player, uri, metadata)
+    log.info("setting uri on "..player.." to "..uri)
     metadata = xml_metadata(metadata)
-    return self:cmd(name, 'SetAVTransportURI', {CurrentURI = uri, CurrentURIMetaData = (metadata or "")})
+    return self:cmd(player, 'SetAVTransportURI', {CurrentURI = uri, CurrentURIMetaData = (metadata or "")})
 end
 
-function M:clear_queue(name)
-    log.info("clearing queue on "..name)
-    return self:cmd(name, 'RemoveAllTracksFromQueue')
+function M:clear_queue(player)
+    log.info("clearing queue on "..player)
+    return self:cmd(player, 'RemoveAllTracksFromQueue')
 end
 
-function M:add_to_queue(uri, metadata, beginning, name)
-    log.info("adding to queue on "..name.." uri "..uri)
+function M:add_to_queue(player, uri, metadata, beginning)
+    log.info("adding to queue on "..player.." uri "..uri)
     metadata = xml_metadata(metadata)
-    return self:cmd(name, 'AddURIToQueue', {EnqueuedURI = uri, EnqueuedURIMetaData = (metadata or ""), DesiredFirstTrackNumberEnqueued = (beginning and 1 or 0)})
+    return self:cmd(player, 'AddURIToQueue', {EnqueuedURI = uri, EnqueuedURIMetaData = (metadata or ""), DesiredFirstTrackNumberEnqueued = (beginning and 1 or 0)})
 end
 
-function M:set_media(media, name)
+function M:set_media(player, media)
     if isRadio(media.uri) then
         return self:set_uri(media.uri, media.metadata)
     end
-    local player = assert(self:get_player(name))
-    local ip = assert(player.ip)
-    self:add_to_queue(media.uri, media.metadata, true, name)
-    self:set_uri("x-rincon-queue:"..player.id.."#0", "", name)
+    local p = assert(self:get_player(player))
+    assert(self:add_to_queue(player, media.uri, media.metadata, true))
+    return self:set_uri(player, "x-rincon-queue:"..p.id.."#0", "")
+end
+
+function M:play_media(player, media)
+    assert(self:set_media(player, media))
+    return self:play(player)
 end
 
 local function clean_name(name)
@@ -498,30 +473,45 @@ local function clean_name(name)
     return result
 end
 
-function M:set_media_by_name(list, pname, name)
-    if not list or not(next(list)) then return end
+function M:find_media_by_field(pname, field)
     local plist = nil
     pname = clean_name(pname)
-    for i, item in ipairs(list) do
-        --log.debug("searching "..item.name.." for "..pname)
-        if pname == clean_name(item.name) then
-            log.info("found media "..item.name)
-            plist = item
-            break
+    for _, list in ipairs({self.playlists, self.favorites}) do
+        for i, item in ipairs(list) do
+            --log.debug("searching "..item.name.." for "..pname)
+            if pname == clean_name(item[field]) then
+                log.info("found media "..item.name)
+                plist = item
+                break
+            end
         end
+        if plist then break end
     end
     if not plist then log.error("did not find "..pname) end
-    return plist and self:set_media(plist, name) or nil
+    return plist
 end
 
-function M:set_playlist(pname, replace, name)
-    if replace then self:clear_queue(name) end
-    return self:set_media_by_name(self.playlists, pname, name)
+function M:play_media_by_name(player, pname, replace)
+    assert(self:set_media_by_name(player, pname, replace))
+    return self:play()
 end
 
-function M:set_favorite(fname, replace, name)
-    if replace then self:clear_queue(name) end
-    return self:set_media_by_name(self.favorites, fname, name)
+function M:play_media_by_id(player, pid, replace)
+    assert(self:set_media_by_id(player, pid, replace))
+    return self:play()
 end
+
+function M:set_media_by_name(player, pname, replace)
+    if replace then self:clear_queue(player) end
+    local item = assert(self:find_media_by_field(pname, 'name'))
+    return self:set_media(player, item)
+end
+
+function M:set_media_by_id(player, pid, replace)
+    if replace then self:clear_queue(player) end
+    local item = assert(self:find_media_by_field(pid, 'id'))
+    return self:set_media(player, item)
+end
+
 
 return M

@@ -1,95 +1,94 @@
-local M = {}; M.__index = M
+local xmlutil = require('xmlutil')
 
-local function constructor(self,o)
-    o = o or {}
-    setmetatable(o, M)
-    return o
+local M = {}
+
+local function interp(s, tab)
+  return (s:gsub('%%%((%a%w*)%)([-0-9%.]*[cdeEfgGiouxXsq])',
+            function(k, fmt) return tab[k] and ("%"..fmt):format(tab[k]) or
+                '%('..k..')'..fmt end))
 end
-setmetatable(M, {__call = constructor})
+getmetatable("").__mod = interp
 
-
-function ParseDIDLTrack(didl, host, port) 
-    if (not didl) return nil
-    MetadataHelper.debug('Parsing DIDL %o', didl);
-    const parsedItem = didl as {[key: string]: any };
-    const didlItem = (parsedItem['DIDL-Lite'] && parsedItem['DIDL-Lite'].item) ? parsedItem['DIDL-Lite'].item : parsedItem;
-    const track: Track = {
-      Album: XmlHelper.DecodeHtml(didlItem['upnp:album']),
-      Artist: XmlHelper.DecodeHtml(didlItem['dc:creator']),
-      AlbumArtUri: undefined,
-      Title: XmlHelper.DecodeHtml(didlItem['dc:title']),
-      UpnpClass: didlItem['upnp:class'],
-      Duration: undefined,
-      ItemId: didlItem._id,
-      ParentId: didlItem._parentID,
-      TrackUri: undefined,
-      ProtocolInfo: undefined,
-    };
-    if (didlItem['r:streamContent'] && typeof didlItem['r:streamContent'] === 'string' && track.Artist === undefined) {
-      const streamContent = didlItem['r:streamContent'].split('-');
-      if (streamContent.length === 2) {
-        track.Artist = XmlHelper.DecodeHtml(streamContent[0].trim());
-        track.Title = XmlHelper.DecodeHtml(streamContent[1].trim());
-      } else {
-        track.Artist = XmlHelper.DecodeHtml(streamContent[0].trim());
-        if (didlItem['r:radioShowMd'] && typeof didlItem['r:radioShowMd'] === 'string') {
-          const radioShowMd = didlItem['r:radioShowMd'].split(',');
-          track.Title = XmlHelper.DecodeHtml(radioShowMd[0].trim());
-        }
-      }
+function M.ParseDIDLTrack(didl, host, port) 
+    if (not didl) then return nil end
+    log.debug('Parsing DIDL...');
+    local parsedItem = didl
+    local didlItem = (parsedItem['DIDL-Lite'] and parsedItem['DIDL-Lite'].item) and parsedItem['DIDL-Lite'].item or parsedItem;
+    local track  = {
+      album = xmlutil.xml_decode(didlItem['upnp:album']),
+      artist = xmlutil.xml_decode(didlItem['dc:creator']),
+      art = undefined,
+      title = xmlutil.xml_decode(didlItem['dc:title']),
+      upnp_class = didlItem['upnp:class'],
+      duration = undefined,
+      itemid = didlItem._id,
+      parentid = didlItem._parentID,
+      uri = "",
+      protocol_info = ""
     }
-    if (didlItem['upnp:albumArtURI']) {
-      const uri = Array.isArray(didlItem['upnp:albumArtURI']) ? didlItem['upnp:albumArtURI'][0] : didlItem['upnp:albumArtURI'];
-      // Github user @hklages discovered that the album uri sometimes doesn't work because of encoding:
-      // See https://github.com/svrooij/node-sonos-ts/issues/93 if you found and album art uri that doesn't work.
-      const art = (uri as string).replace(/&amp;/gi, '&'); // .replace(/%25/g, '%').replace(/%3a/gi, ':');
-      track.AlbumArtUri = art.startsWith('http') ? art : `http://${host}:${port}${art}`;
-    }
+    if (didlItem['r:streamContent'] and type(didlItem['r:streamContent']) == 'string' and track.Artist == nil) then
+      local streamContent = didlItem['r:streamContent'].split('-');
+      if (streamContent.length == 2) then
+        track.artist = xmlutil.xml_decode(streamContent[0].trim());
+        track.title = xmlutil.xml_decode(streamContent[1].trim());
+      else 
+        track.artist = xmlutil.xml_decode(streamContent[0].trim());
+        if (didlItem['r:radioShowMd'] and type(didlItem['r:radioShowMd']) == 'string') then
+          local radioShowMd = didlItem['r:radioShowMd'].split(',');
+          track.title = xmlutil.xml_decode(radioShowMd[0].trim());
+        end
+      end
+    end
+    if (didlItem['upnp:albumArtURI']) then
+      local uri = type(didlItem['upnp:albumArtURI']) == "table" and didlItem['upnp:albumArtURI'][0] or didlItem['upnp:albumArtURI']
+      -- Github user @hklages discovered that the album uri sometimes doesn't work because of encodings
+      -- See https://github.com/svrooij/node-sonos-ts/issues/93 if you found and album art uri that doesn't work
+      local art = uri:gsub('&amp;', '&'); -- .replace(/%25/g, '%').replace(/%3a/gi, ':');
+      track.art = art:match('^http') and art or `http://${host}:${port}${art}`;
+    end
 
-    if (didlItem.res) {
-      track.Duration = didlItem.res._duration;
-      track.TrackUri = XmlHelper.DecodeTrackUri(didlItem.res['#text']);
-      track.ProtocolInfo = didlItem.res._protocolInfo;
-    }
+    if (didlItem.res) then
+      track.duration = didlItem.res._duration;
+      track.uri = xmlutil.xml_decode(didlItem.res);
+      track.protocol_info = didlItem.res._protocolInfo;
+    end
 
-    return track;
-  }
+    return track
+  end
 
-  /**
-   * Track to MetaData will generate a XML string that can be used as MetaData
-   *
-   * @static
-   * @param {Track} track The track do describe
-   * @returns {string} XML string (be sure to encode before using)
-   * @memberof MetadataHelper
-   */
-  static TrackToMetaData(track: Track | undefined, includeResource = false, cdudn = 'RINCON_AssociatedZPUDN'): string {
-    if (track === undefined) {
-      return '';
-    }
+  
+function M.track_metadata(track, includeResource, cdudn) 
+    if track == nil then
+      return ''
+    end
 
-    const localCdudn = track.CdUdn ?? cdudn;
-    const protocolInfo = track.ProtocolInfo ?? 'http-get:*:audio/mpeg:*';
-    const itemId = track.ItemId ?? '-1';
+    if not cdudn then
+      cdudn = 'RINCON_AssociatedZPUDN'
+    end
 
-    let metadata = '<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/" xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">';
-    metadata += `<item id="${itemId}" restricted="true"${track.ParentId !== undefined ? ` parentID="${track.ParentId}">` : '>'}`;
-    if (includeResource) metadata += `<res protocolInfo="${protocolInfo}" duration="${track.Duration}">${track.TrackUri}</res>`;
-    if (track.AlbumArtUri !== undefined) metadata += `<upnp:albumArtURI>${track.AlbumArtUri}</upnp:albumArtURI>`;
-    if (track.Title !== undefined) metadata += `<dc:title>${track.Title}</dc:title>`;
-    if (track.Artist !== undefined) metadata += `<dc:creator>${track.Artist}</dc:creator>`;
-    if (track.Album !== undefined) metadata += `<upnp:album>${track.Album}</upnp:album>`;
-    if (track.UpnpClass !== undefined) metadata += `<upnp:class>${track.UpnpClass}</upnp:class>`;
-    metadata += `<desc id="cdudn" nameSpace="urn:schemas-rinconnetworks-com:metadata-1-0/">${localCdudn}</desc>`;
-    metadata += '</item></DIDL-Lite>';
-    return metadata;
-  }
+    local localCdudn = track.cdudn or cdudn;
+    local protocolInfo = track.protocol_info or 'http-get:*:audio/mpeg:*';
+    local itemId = track.itemid or '-1';
+
+    local metadata = '<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/" xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">'
+    local parent_attr = track.parentid and ' parentID="'..track.parentid..'"' or ''
+    metadata = metadata ..  '<item id="%(itemId)s" restricted="true"%(parent_attr)s>' % {itemId = itemId, parent_attr = parent_attr}
+    if (includeResource) then metadata = metadata ..  `<res protocolInfo="${protocolInfo}" duration="${track.Duration}">${track.TrackUri}</res>` end
+    if (track.art) then metadata = metadata ..  `<upnp:albumArtURI>${track.AlbumArtUri}</upnp:albumArtURI>` end
+    if (track.title) then metadata = metadata ..  `<dc:title>${track.Title}</dc:title>` end 
+    if (track.artist) then metadata = metadata ..  `<dc:creator>${track.Artist}</dc:creator>` end
+    if (track.album) then metadata = metadata ..  `<upnp:album>${track.Album}</upnp:album>` end
+    if (track.upnp_class) then metadata = metadata ..  '<upnp:class>%(upnp_class)s</upnp:class>' % {upnp_class = track.upnp_class} end
+    metadata = metadata .. '<desc id="cdudn" nameSpace="urn:schemas-rinconnetworks-com:metadata-1-0/">%(localCdudn)s</desc>' % {localCdudn = localCdudn}
+    metadata = metadata .. '</item></DIDL-Lite>'
+    return metadata
+  end
 
   static GuessMetaDataAndTrackUri(trackUri: string, spotifyRegion = '2311'): { trackUri: string; metadata: Track | string } {
-    const metadata = MetadataHelper.GuessTrack(trackUri, spotifyRegion);
+    local metadata = MetadataHelper.GuessTrack(trackUri, spotifyRegion);
 
     return {
-      trackUri: metadata === undefined || metadata.TrackUri === undefined ? trackUri : XmlHelper.DecodeTrackUri(metadata.TrackUri) ?? '',
+      trackUri: metadata == undefined || metadata.TrackUri == undefined ? trackUri : XmlHelper.DecodeTrackUri(metadata.TrackUri) ?? '',
       metadata: metadata || '',
     };
   }
@@ -98,11 +97,11 @@ function ParseDIDLTrack(didl, host, port)
     MetadataHelper.debug('Guessing metadata for %s', trackUri);
     let title = '';
     // Can someone create a test for the next line.
-    const match = /.*\/(.*)$/g.exec(trackUri.replace(/\.[a-zA-Z0-9]{3}$/, ''));
+    local match = /.*\/(.*)$/g.exec(trackUri.replace(/\.[a-zA-Z0-9]{3}$/, ''));
     if (match) {
       [, title] = match;
     }
-    const track: Track = {
+    local track: Track = {
     };
     if (trackUri.startsWith('x-file-cifs')) {
       track.ItemId = trackUri.replace('x-file-cifs', 'S').replace(/\s/g, '%20');
@@ -114,8 +113,8 @@ function ParseDIDLTrack(didl, host, port)
       return track;
     }
     if (trackUri.startsWith('file:///jffs/settings/savedqueues.rsq#') || trackUri.startsWith('sonos:playlist:')) {
-      const queueId = trackUri.match(/\d+/g);
-      if (queueId?.length === 1) {
+      local queueId = trackUri.match(/\d+/g);
+      if (queueId?.length == 1) {
         track.TrackUri = `file:///jffs/settings/savedqueues.rsq#${queueId[0]}`;
         track.UpnpClass = 'object.container.playlistContainer';
         track.ItemId = `SQ:${queueId[0]}`;
@@ -124,9 +123,9 @@ function ParseDIDLTrack(didl, host, port)
       }
     }
     if (trackUri.startsWith('x-rincon-playlist')) {
-      const parentMatch = /.*#(.*)\/.*/g.exec(trackUri);
-      if (parentMatch === null) throw new Error('ParentID not found');
-      const parentID = parentMatch[1];
+      local parentMatch = /.*#(.*)\/.*/g.exec(trackUri);
+      if (parentMatch == null) throw new Error('ParentID not found');
+      local parentID = parentMatch[1];
       track.ItemId = `${parentID}/${title.replace(/\s/g, '%20')}`;
       track.Title = title.replace('%20', ' ');
       track.UpnpClass = this.GetUpnpClass(parentID);
@@ -166,63 +165,63 @@ function ParseDIDLTrack(didl, host, port)
     }
 
     if (trackUri.startsWith('x-rincon-cpcontainer:1004006calbum-')) { // Deezer Album
-      const numbers = trackUri.match(/\d+/g);
+      local numbers = trackUri.match(/\d+/g);
       if (numbers && numbers.length >= 2) {
         return MetadataHelper.deezerMetadata('album', numbers[1]);
       }
     }
 
-    const appleAlbumItem = /x-rincon-cpcontainer:1004206c(libraryalbum|album):([.\d\w]+)(?:\?|$)/.exec(trackUri);
+    local appleAlbumItem = /x-rincon-cpcontainer:1004206c(libraryalbum|album):([.\d\w]+)(?:\?|$)/.exec(trackUri);
     if (appleAlbumItem) { // Apple Music Album
       return MetadataHelper.appleMetadata(appleAlbumItem[1], appleAlbumItem[2]);
     }
 
-    const applePlaylistItem = /x-rincon-cpcontainer:1006206c(libraryplaylist|playlist):([.\d\w]+)(?:\?|$)/.exec(trackUri);
+    local applePlaylistItem = /x-rincon-cpcontainer:1006206c(libraryplaylist|playlist):([.\d\w]+)(?:\?|$)/.exec(trackUri);
     if (applePlaylistItem) { // Apple Music Playlist
       return MetadataHelper.appleMetadata(applePlaylistItem[1], applePlaylistItem[2]);
     }
 
-    const appleTrackItem = /x-sonos-http:(librarytrack|song):([.\d\w]+)\.mp4\?.*sid=204/.exec(trackUri);
+    local appleTrackItem = /x-sonos-http:(librarytrack|song):([.\d\w]+)\.mp4\?.*sid=204/.exec(trackUri);
     if (appleTrackItem) { // Apple Music Track
       return MetadataHelper.appleMetadata(appleTrackItem[1], appleTrackItem[2]);
     }
 
     if (trackUri.startsWith('x-rincon-cpcontainer:10fe206ctracks-artist-')) { // Deezer Artists Top Tracks
-      const numbers = trackUri.match(/\d+/g);
+      local numbers = trackUri.match(/\d+/g);
       if (numbers && numbers.length >= 3) {
         return MetadataHelper.deezerMetadata('artistTopTracks', numbers[2]);
       }
     }
 
     if (trackUri.startsWith('x-rincon-cpcontainer:1006006cplaylist_spotify%3aplaylist-')) { // Deezer Playlist
-      const numbers = trackUri.match(/\d+/g);
+      local numbers = trackUri.match(/\d+/g);
       if (numbers && numbers.length >= 3) {
         return MetadataHelper.deezerMetadata('playlist', numbers[2]);
       }
     }
 
     if (trackUri.startsWith('x-sonos-http:tr%3a') && trackUri.includes('sid=2')) { // Deezer Track
-      const numbers = trackUri.match(/\d+/g);
+      local numbers = trackUri.match(/\d+/g);
       if (numbers && numbers.length >= 2) {
         return MetadataHelper.deezerMetadata('track', numbers[1]);
       }
     }
 
-    const parts = trackUri.split(':');
-    if ((parts.length === 3 || parts.length === 5) && parts[0] === 'spotify') {
+    local parts = trackUri.split(':');
+    if ((parts.length == 3 || parts.length == 5) && parts[0] == 'spotify') {
       return MetadataHelper.guessSpotifyMetadata(trackUri, parts[1], spotifyRegion);
     }
 
-    if (parts.length === 3 && parts[0] === 'deezer') {
+    if (parts.length == 3 && parts[0] == 'deezer') {
       return MetadataHelper.deezerMetadata(parts[1], parts[2]);
     }
 
-    if (parts.length === 3 && parts[0] === 'apple') {
+    if (parts.length == 3 && parts[0] == 'apple') {
       return MetadataHelper.appleMetadata(parts[1], parts[2]);
     }
 
-    if (parts.length === 2 && parts[0] === 'radio' && parts[1].startsWith('s')) {
-      const [, stationId] = parts;
+    if (parts.length == 2 && parts[0] == 'radio' && parts[1].startsWith('s')) {
+      local [, stationId] = parts;
       track.UpnpClass = 'object.item.audioItem.audioBroadcast';
       track.Title = 'Some radio station';
       track.ItemId = '10092020_xxx_xxxx'; // Add station ID from url (regex?)
@@ -235,8 +234,8 @@ function ParseDIDLTrack(didl, host, port)
   }
 
   private static guessSpotifyMetadata(trackUri: string, kind: string, region: string): Track | undefined {
-    const spotifyUri = trackUri.replace(/:/g, '%3a');
-    const track: Track = {
+    local spotifyUri = trackUri.replace(/:/g, '%3a');
+    local track: Track = {
       Title: '',
       CdUdn: `SA_RINCON${region}_X_#Svc${region}-0-Token`,
     };
@@ -287,7 +286,7 @@ function ParseDIDLTrack(didl, host, port)
   }
 
   private static deezerMetadata(kind: 'album' | 'artistTopTracks' | 'playlist' | 'track' | unknown, id: string, region = '519'): Track | undefined {
-    const track: Track = {
+    local track: Track = {
       CdUdn: `SA_RINCON${region}_X_#Svc${region}-0-Token`,
     };
     switch (kind) {
@@ -319,11 +318,11 @@ function ParseDIDLTrack(didl, host, port)
 
   private static appleMetadata(kind: 'album' | 'libraryalbum' | 'track' | 'librarytrack' | 'song' | 'playlist' | 'libraryplaylist' | unknown,
     id: string, region = '52231'): Track | undefined {
-    const track: Track = {
+    local track: Track = {
       Title: '',
       CdUdn: `SA_RINCON${region}_X_#Svc${region}-0-Token`,
     };
-    const trackLabels = { song: 'song', track: 'song', librarytrack: 'librarytrack' };
+    local trackLabels = { song: 'song', track: 'song', librarytrack: 'librarytrack' };
     switch (kind) {
       case 'album':
       case 'libraryalbum':
