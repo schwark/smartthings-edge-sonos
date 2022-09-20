@@ -455,6 +455,7 @@ function M:play_media(player, media)
 end
 
 local function clean_name(name)
+    if not name then return name end
     local result = name:lower()
     result = result:gsub("[%s,'\"_%-]+","")
     return result
@@ -467,7 +468,7 @@ function M:find_media_by_field(pname, field)
         for i, item in ipairs(list) do
             --log.debug("searching "..item.name.." for "..pname)
             if pname == clean_name(item[field]) then
-                log.info("found media "..item.name)
+                log.info("found media "..item.title)
                 plist = item
                 break
             end
@@ -490,7 +491,7 @@ end
 
 function M:set_media_by_name(player, pname, replace)
     if replace then self:clear_queue(player) end
-    local item = assert(self:find_media_by_field(pname, 'name'))
+    local item = assert(self:find_media_by_field(pname, 'title'))
     return self:set_media(player, item)
 end
 
