@@ -216,10 +216,12 @@ function M:find_devices()
             err = ip
         else
             res = parse_ssdp(res)
-            log.debug("st is "..res.st)
             if(res and res.st and config.URN == res.st) then
                 local player = self:init_player(ip)
-                if player then table.insert(result, player) end
+                if player then 
+                    log.info('found a zone at '..player.ip..' named '..player.name)
+                    table.insert(result, player) 
+                end
             end
         end
     until err
@@ -511,7 +513,9 @@ function M:whats_playing(player)
         if (result) then
             result = result[1]
             result.num = response.TrackNum
-            result.duration = response.TrackDuration
+            if not result.duration then
+                result.duration = response.TrackDuration
+            end
             result.metadata = response.TrackMetaData
             result.position = response.RelTime            
         end
