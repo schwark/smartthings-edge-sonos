@@ -11,6 +11,7 @@ local xml_handler = require "xmlhandler.tree"
 local log = require "log"
 local math = require ('math')
 local config = require('config')
+local xmlutil = require('xmlutil')
 
 
 local errors = {
@@ -33,23 +34,28 @@ local errors = {
         ["610"] = "Invalid sequence" ,
         ["611"] = "Invalid control URL" ,
         ["612"] = "No such session", 
-        ["701"] = "No such object" ,
-        ["702"] = "Invalid CurrentTagValue" ,
-        ["703"] = "Invalid NewTagValue" ,
-        ["704"] = "Required tag" ,
-        ["705"] = "Read-only tag" ,
-        ["706"] = "Parameter mismatch" ,
-        ["708"] = "Invalid search criteria" ,
-        ["709"] = "Invalid sort criteria" ,
-        ["710"] = "No such container" ,
-        ["711"] = "Restricted object" ,
-        ["712"] = "Bad metadata" ,
-        ["713"] = "Restricted parent object" ,
-        ["714"] = "No such source resource" ,
-        ["715"] = "Resource access denied" ,
-        ["716"] = "Transfer busy" ,
-        ["717"] = "No such file transfer" ,
-        ["718"] = "No such destination resource" ,
+        ["701"] = "Transition not available",
+        ["702"] = "No content",
+        ["703"] = "Read error",
+        ["704"] = "Format not supported for playback",
+        ["705"] = "Transport is locked",
+        ["706"] = "Write error",
+        ["707"] = "Media protected or not writeable",
+        ["708"] = "Format not supported for recording",
+        ["709"] = "Media is full",
+        ["710"] = "Seek mode not supported",
+        ["711"] = "Illegal seek target",
+        ["712"] = "Play mode not supported",
+        ["713"] = "Record quality not supported",
+        ["714"] = "Illegal MIME-Type",
+        ["715"] = "Content busy",
+        ["716"] = "Resource not found",
+        ["717"] = "Play speed not supported",
+        ["718"] = "Invalid InstanceID",
+        ["737"] = "No dns configured",
+        ["738"] = "Bad domain",
+        ["739"] = "Server error",
+        ["800"] = "Command not supported or not a coordinator",
         ["719"] = "Destination resource access denied" ,
         ["720"] = "Cannot process the request" 
 }
@@ -96,6 +102,7 @@ local types = {
         control = '/MediaRenderer/AVTransport/Control',
         commands = {
             SetAVTransportURI = {params = {InstanceID = 0, CurrentURI = "", CurrentURIMetaData= ""}},
+            RemoveAllTracksFromQueue = {params = {InstanceID = 0}},
             AddURIToQueue = {params = {InstanceID = 0, EnqueuedURI = "", EnqueuedURIMetaData= "", DesiredFirstTrackNumberEnqueued=0, EnqueueAsNext=false}},
             GetMediaInfo = {params = {InstanceID = 0}},
             GetPositionInfo = {params = {InstanceID = 0}},
@@ -115,7 +122,6 @@ local types = {
     }
 }
 
-
 local function xml_decode(str)
     str = str:gsub('&lt;', '<' )
     str = str:gsub('&gt;', '>' )
@@ -129,7 +135,7 @@ end
 
 local function xml_encode(str)
     if type(str) == "boolean" then
-        str = str and 1 or 0
+        str = str and "1" or "0"
     end
     str = tostring(str)
     str = str:gsub('&', '&amp;') -- Be sure to do this before all others
@@ -138,6 +144,22 @@ local function xml_encode(str)
     str = str:gsub('"' ,'&quot;')
     str = str:gsub("'" ,'&apos;')
     return str
+end
+
+local function tight_xml(xml)
+    xml = xml:gsub('^%s+','')
+    xml = xml:gsub('>%s+','>')
+    xml = xml:gsub('%s+<','<')
+    xml = xml:gsub('%s+$','')
+    log.debug(xml)
+    return xml
+end
+
+local function xml_metadata(metadata)
+    if metadata and type(metadata) == "table" then
+        metadata = tight_xml(xmlutil.toXml(metadata))
+    end
+    return metadata
 end
 
 local function get_command_meta(command)
@@ -198,7 +220,7 @@ end
 
 function M:init_player(ip)
     local meta = get_config(ip)
-    log.debug("meta for "..ip.." is "..utils.stringify_table(meta))
+    --log.debug("meta for "..ip.." is "..utils.stringify_table(meta))
     if meta and meta.friendlyName and "" ~= meta.friendlyName then
         log.info("sonos speaker "..meta.friendlyName.." at "..ip)
         return {ip=ip, id=meta.UDN:gsub('uuid:',''), name=meta.friendlyName}                   
@@ -278,9 +300,11 @@ local function get_param_xml(cmd, params)
         --log.debug(utils.stringify_table(cmd.params))
         --log.debug(utils.stringify_table(params))
         local parameters = utils.deep_copy(cmd.params)
-        for key, value in pairs(parameters) do
-            if not value or "" == value or (params and params[key]) then
-                parameters[key] = params and params[key] or ""
+        if params then
+            for key, value in pairs(parameters) do
+                if params[key] then
+                    parameters[key] = params[key]
+                end
             end
         end
         paramXml = toXml(parameters)
@@ -288,7 +312,10 @@ local function get_param_xml(cmd, params)
     return paramXml
 end
 
-function M:cmd(ip, command, params)
+function M:cmd(name, command, params)
+    local player = assert(self:get_player(name))
+    local ip = assert(player.ip)
+
     local res = {}
     local url = 'http://'..ip..':1400'
     local cmd = assert(get_command_meta(command))
@@ -303,8 +330,8 @@ function M:cmd(ip, command, params)
         ['Content-Type'] = 'text/xml; charset="utf-8"',
         ['Content-Length'] = #body
     }
-    log.debug(url)
-    log.debug(utils.stringify_table(headers))
+    log.debug("executing on "..name.." command "..command.." with params "..(params and utils.stringify_table(params) or "none"))
+    --log.debug(utils.stringify_table(headers))
     log.debug(body)
 
     local _, status = http.request({
@@ -335,7 +362,6 @@ function M:cmd(ip, command, params)
         --log.debug(utils.stringify_table(result))     
     else
         result = status
-        log.error(status)
         if 500 == status then
             local xmlres = xml_handler:new()
             local xml_parser = xml2lua.parser(xmlres)
@@ -374,11 +400,9 @@ function M:get_player(name)
 end
 
 function M:browse(term, name)
-    local player = assert(self:get_player(name))
-    local ip = assert(player.ip)
-    local didl = self:cmd(ip,'Browse', {ObjectID = term, parse = 'Result'})
+    local didl = self:cmd(name,'Browse', {ObjectID = term, parse = 'Result'})
     local result = nil
-    log.debug(utils.stringify_table(didl))
+    --log.debug(utils.stringify_table(didl))
     local list = didl and didl.Result['DIDL-Lite'] and didl.Result['DIDL-Lite'] and (didl.Result['DIDL-Lite'].item or didl.Result['DIDL-Lite'].container)
     if list then
         result = {}
@@ -386,7 +410,7 @@ function M:browse(term, name)
             table.insert(result, {name=item['dc:title'], metadata=item['r:resMD'], art=(type(item['upnp:albumArtURI']) == "table" and item['upnp:albumArtURI'][1] or item['upnp:albumArtURI']), uri=item.res[1], desc=item['r:description']})
         end
     end
-    log.debug(result and utils.stringify_table(result) or "nil")
+    --log.debug(result and utils.stringify_table(result) or "nil")
     return result
 end
 
@@ -401,15 +425,11 @@ function M:find_playlists(name)
 end
 
 function M:playback_cmd(cmd, name)
-    local player = assert(self:get_player(name))
-    local ip = assert(player.ip)
-    return self:cmd(ip, cmd)
+    return self:cmd(name, cmd)
 end
 
 function M:mute_cmd(state, name)
-    local player = assert(self:get_player(name))
-    local ip = assert(player.ip)
-    return self:cmd(ip, 'SetMute', {DesiredMute = state and true or false})
+    return self:cmd(name, 'SetMute', {DesiredMute = state and true or false})
 end
 
 function M:play(name)
@@ -441,23 +461,25 @@ function M:unmute(name)
 end
 
 function M:set_volume(name, volume) -- number between 0 and 100
-    local player = assert(self:get_player(name))
-    local ip = assert(player.ip)
     assert(volume)
-    return self:cmd(ip, 'SetVolume', {DesiredVolume = volume})
+    return self:cmd(name, 'SetVolume', {DesiredVolume = volume})
 end
 
 function M:set_uri(uri, metadata, name)
-    local player = assert(self:get_player(name))
-    local ip = assert(player.ip)
-    return self:cmd(ip, 'SetAVTransportURI', {CurrentURI = uri, CurrentURIMetaData = (metadata or "")})
+    log.info("setting uri on "..name.." to "..uri)
+    metadata = xml_metadata(metadata)
+    return self:cmd(name, 'SetAVTransportURI', {CurrentURI = uri, CurrentURIMetaData = (metadata or "")})
 end
 
-function M:add_to_queue(uri, metadata, name)
-    local player = assert(self:get_player(name))
-    local ip = assert(player.ip)
-    log.info("adding to queue "..uri)
-    return self:cmd(ip, 'AddURIToQueue', {EnqueuedURI = uri, EnqueuedURIMetaData = (metadata or "")})
+function M:clear_queue(name)
+    log.info("clearing queue on "..name)
+    return self:cmd(name, 'RemoveAllTracksFromQueue')
+end
+
+function M:add_to_queue(uri, metadata, beginning, name)
+    log.info("adding to queue on "..name.." uri "..uri)
+    metadata = xml_metadata(metadata)
+    return self:cmd(name, 'AddURIToQueue', {EnqueuedURI = uri, EnqueuedURIMetaData = (metadata or ""), DesiredFirstTrackNumberEnqueued = (beginning and 1 or 0)})
 end
 
 function M:set_media(media, name)
@@ -466,7 +488,7 @@ function M:set_media(media, name)
     end
     local player = assert(self:get_player(name))
     local ip = assert(player.ip)
-    self:add_to_queue(media.uri, media.metadata, name)
+    self:add_to_queue(media.uri, media.metadata, true, name)
     self:set_uri("x-rincon-queue:"..player.id.."#0", "", name)
 end
 
@@ -481,20 +503,24 @@ function M:set_media_by_name(list, pname, name)
     local plist = nil
     pname = clean_name(pname)
     for i, item in ipairs(list) do
-        log.debug("searching "..item.name.." for "..pname)
+        --log.debug("searching "..item.name.." for "..pname)
         if pname == clean_name(item.name) then
+            log.info("found media "..item.name)
             plist = item
             break
         end
     end
+    if not plist then log.error("did not find "..pname) end
     return plist and self:set_media(plist, name) or nil
 end
 
-function M:set_playlist(pname, name)
+function M:set_playlist(pname, replace, name)
+    if replace then self:clear_queue(name) end
     return self:set_media_by_name(self.playlists, pname, name)
 end
 
-function M:set_favorite(fname, name)
+function M:set_favorite(fname, replace, name)
+    if replace then self:clear_queue(name) end
     return self:set_media_by_name(self.favorites, fname, name)
 end
 
