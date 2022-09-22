@@ -5,9 +5,10 @@ local config = {}
 -- Workspace to avoid hardcoded values.
 config.SPEAKER_PROFILE='Sonos.Speaker.LAN.v1'
 config.DEVICE_TYPE='LAN'
-config.SCHEDULE_PERIOD=15
 config.MANUFACTURER='Sonos' 
-config.UPDATE_MAX_FREQUENCY = 10
+config.PLAYER_UPDATE_SCHEDULE_PERIOD=600
+config.PLAYER_UPDATE_MAX_FREQUENCY=600
+config.STATE_UPDATE_SCHEDULE_PERIOD=15
 
 --config.URN='urn:schemas-upnp-org:device:ZonePlayer:1'
 config.URN='urn:smartspeaker-audio:service:SpeakerGroup:1'
@@ -15,12 +16,15 @@ config.URN='urn:smartspeaker-audio:service:SpeakerGroup:1'
 config.MC_ADDRESS='239.255.255.250'
 config.MC_PORT=1900
 config.MC_TIMEOUT=10
+config.SONOS_HTTP_PORT = '1400'
 config.MSEARCH=table.concat({
   'M-SEARCH * HTTP/1.1',
   'HOST: 239.255.255.250:1900',
   'MAN: "ssdp:discover"',
   'MX: 4',
-  'ST: '..config.URN
+  'ST: '..config.URN,
+  '',
+  ''
 }, '\r\n')
 
 

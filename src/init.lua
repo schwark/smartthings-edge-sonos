@@ -14,6 +14,8 @@ local driver = Driver("Sonos LAN", {
       capabilities.audioVolume,
       capabilities.audioStream,
       capabilities.audioNotification,
+      capabilities.switch,
+      capabilities.switchLevel,
       capabilities.refresh
     },    
     capability_handlers = {
@@ -35,6 +37,13 @@ local driver = Driver("Sonos LAN", {
         [capabilities.audioNotification.commands.playTrack.NAME] = commands.handle_track_command,
         [capabilities.audioNotification.commands.playTrackAndRestore.NAME] = commands.handle_track_command,
         [capabilities.audioNotification.commands.playTrackAndResume.NAME] = commands.handle_track_command,
+      },
+      [capabilities.switch.ID] = {
+        [capabilities.switch.commands.on.NAME] = commands.handle_track_command,
+        [capabilities.switch.commands.off.NAME] = commands.handle_track_command,
+      },
+      [capabilities.switchLevel.ID] = {
+        [capabilities.switchLevel.commands.setLevel.NAME] = commands.handle_set_track,
       },
       [capabilities.refresh.ID] = {
         [capabilities.refresh.commands.refresh.NAME] = commands.handle_refresh,

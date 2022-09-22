@@ -10,7 +10,60 @@ components:
     version: 1
   - id: audioVolume
     version: 1
+  - id: switch
+    version: 1
+  - id: switchLevel
+    version: 1
   - id: refresh
     version: 1
   categories:
   - name: NetworkAudio
+preferences:
+  - title: "Current Favorite/Playlist"
+    name: current
+    description: "Name of Current Favorite/Playlist"
+    required: false
+    preferenceType: string
+    definition:
+      stringType: text
+      default: ""
+  - title: "Favorite/Playlist #1"
+    name: song1
+    description: "Name of Favorite/Playlist #1"
+    required: false
+    preferenceType: string
+    definition:
+      stringType: text
+      default: ""
+  - title: "Favorite/Playlist #2"
+    name: song2
+    description: "Name of Favorite/Playlist #2"
+    required: false
+    preferenceType: string
+    definition:
+      stringType: text
+      default: ""
+  - title: "Favorite/Playlist #3"
+    name: song3
+    description: "Name of Favorite/Playlist #3"
+    required: false
+    preferenceType: string
+    definition:
+      stringType: text
+      default: ""
+  - title: "Favorite/Playlist #4"
+    name: song4
+    description: "Name of Favorite/Playlist #4"
+    required: false
+    preferenceType: string
+    definition:
+      stringType: text
+      default: ""
+  - title: "Favorite/Playlist #5"
+    name: song5
+    description: "Name of Favorite/Playlist #5"
+    required: false
+    preferenceType: string
+    definition:
+      stringType: text
+      default: ""

@@ -14,7 +14,7 @@ local config = require('config')
 local xmlutil = require('xmlutil')
 local metadata = require('sonos.metadata')
 
-SONOS_HTTP_PORT = '1400'
+
 
 local errors = {
         ["400"] = "Bad request" ,
@@ -69,14 +69,6 @@ local function interp(s, tab)
 end
 getmetatable("").__mod = interp
 
-local function isRadio(uri)
-    return uri:match('x-sonosapi-stream:') or
-      uri:match('x-sonosapi-radio:') or
-      uri:match('pndrradio:') or
-      uri:match('x-sonosapi-hls:') or
-      uri:match('x-sonosprog-http:');
-end
-
 local types = {
     ['urn:schemas-upnp-org:service:ContentDirectory:1'] = {
         control = '/MediaServer/ContentDirectory/Control',
@@ -108,12 +100,14 @@ local types = {
             AddURIToQueue = {params = {InstanceID = 0, EnqueuedURI = "", EnqueuedURIMetaData= "", DesiredFirstTrackNumberEnqueued=0, EnqueueAsNext=false}},
             GetMediaInfo = {params = {InstanceID = 0}},
             GetPositionInfo = {params = {InstanceID = 0}},
+            GetTransportInfo = {params = {InstanceID = 0}}, -- STOPPED / PLAYING / PAUSED_PLAYBACK / TRANSITIONING
             SetPlayMode = {params = {InstanceID = 0, NewPlayMode = ""}}, -- NORMAL / REPEAT_ALL / REPEAT_ONE / SHUFFLE_NOREPEAT / SHUFFLE / SHUFFLE_REPEAT_ONE
             Play = {params = {InstanceID = 0, Speed = 1}},
             Pause = {params = {InstanceID = 0}},
             Stop = {params = {InstanceID = 0}},
             Next = {params = {InstanceID = 0}},
-            Previous = {params = {InstanceID = 0}}
+            Previous = {params = {InstanceID = 0}},
+            Seek = {params = {InstanceID = 0, Unit = "", Target = ""}}, --TRACK_NR / REL_TIME / TIME_DELTA // Position of track in queue (start at 1) or hh:mm:ss for REL_TIME or +/-hh:mm:ss for TIME_DELTA
         }
     },
     ['urn:schemas-sonos-com:service:Queue:1'] = {
@@ -147,15 +141,24 @@ local function constructor(self,o)
     o.players = nil
     o.favorites = nil
     o.playlists = nil
+    o.last_updated = nil
     setmetatable(o, M)
     return o
 end
 setmetatable(M, {__call = constructor})
 
+local _instance = nil
+
+function M.get_instance() 
+    if not _instance then
+        _instance = M()
+    end
+    return _instance
+end
 
 local function get_config(ip)
     local res = {}
-    local url = 'http://'..ip..':'..SONOS_HTTP_PORT..'/xml/group_description.xml'
+    local url = 'http://'..ip..':'..config.SONOS_HTTP_PORT..'/xml/group_description.xml'
     local _, status = http.request({
       url=url,
       sink=ltn12.sink.table(res)
@@ -174,7 +177,7 @@ end
 local function parse_ssdp(data)
     local res = {}
     res.status = data:sub(0, data:find('\r\n'))
-    for k, v in data:gmatch('([%w-%.]+): ([%a+-_: /=]+)') do
+    for k, v in data:gmatch('([%w-]+):[%s]+([%w+-:%. /=]+)') do
       res[k:lower()] = v
     end
     return res
@@ -194,7 +197,7 @@ end
 -- Socket and broadcast a single
 -- M-SEARCH request, i.e., it
 -- must be looped appart.
-function M:find_devices()
+function M:find_players()
     -- UDP socket initialization
     local upnp = socket.udp()
     upnp:setsockname('*', 0)
@@ -234,7 +237,7 @@ end
   
 
 function M:discover()
-    return self:find_devices()
+    return self:update()
 end
 
 local function get_request_body(command)
@@ -281,7 +284,7 @@ function M:cmd(player, command, params)
     local ip = assert(player.ip)
 
     local res = {}
-    local url = 'http://'..ip..':'..SONOS_HTTP_PORT
+    local url = 'http://'..ip..':'..config.SONOS_HTTP_PORT
     local cmd = assert(get_command_meta(command))
 
     url = url..cmd.control
@@ -342,7 +345,7 @@ end
 
 function M:get_players()
     if not self.players then
-        self:discover()
+        self:update()
     end
     return self.players
 end
@@ -360,8 +363,10 @@ function M:get_player(name)
         if not name or "" == name then -- any player will do
             return players[1]
         end
+        name = name:gsub('uuid:','')
         for i, item in ipairs(players) do
             if item.name:lower() == name:lower() then return item end
+            if item.id == name then return item end
         end
     end
     return nil
@@ -371,7 +376,7 @@ function M:browse(player, term)
     local didl = self:cmd(player,'Browse', {ObjectID = term})
     if not didl or not didl['Result'] then return nil else didl = didl['Result'] end
     --log.debug(didl)
-    local result = metadata.parse_didl(didl, player, SONOS_HTTP_PORT)
+    local result = metadata.parse_didl(didl, player, config.SONOS_HTTP_PORT)
     log.debug(result and utils.stringify_table(result) or "nil")
     return result
 end
@@ -387,11 +392,11 @@ function M:find_playlists(player)
 end
 
 function M:playback_cmd(player, cmd)
-    return self:cmd(player, cmd)
+    return self:cmd(player, cmd) and true or false
 end
 
 function M:mute_cmd(player, state)
-    return self:cmd(player, 'SetMute', {DesiredMute = state and true or false})
+    return self:cmd(player, 'SetMute', {DesiredMute = state and true or false}) and true or false
 end
 
 function M:play(player)
@@ -414,6 +419,11 @@ function M:next(player)
     return self:playback_cmd(player, 'Next')
 end
 
+function M:get_mute(player) 
+    local result = self:cmd(player, 'GetMute')
+    return result and result.CurrentMute or nil
+end
+
 function M:mute(player)
     return self:mute_cmd(player, true)
 end
@@ -422,28 +432,33 @@ function M:unmute(player)
     return self:mute_cmd(player, false)
 end
 
+function M:get_volume(player) 
+    local result = self:cmd(player, 'GetVolume')
+    return result and result.CurrentVolume or nil
+end
+
 function M:set_volume(player, volume) -- number between 0 and 100
-    assert(volume)
-    return self:cmd(player, 'SetVolume', {DesiredVolume = volume})
+    assert(volume and type(volume) == "number" and volume >= 0 and volume <= 100)
+    return self:cmd(player, 'SetVolume', {DesiredVolume = volume}) and true or false
 end
 
 function M:set_uri(player, uri, mdata)
     log.info("setting uri on "..player.." to "..uri)
-    return self:cmd(player, 'SetAVTransportURI', {CurrentURI = uri, CurrentURIMetaData = (mdata or "")})
+    return self:cmd(player, 'SetAVTransportURI', {CurrentURI = uri, CurrentURIMetaData = (mdata or "")}) and true or false
 end
 
 function M:clear_queue(player)
     log.info("clearing queue on "..player)
-    return self:cmd(player, 'RemoveAllTracksFromQueue')
+    return self:cmd(player, 'RemoveAllTracksFromQueue') and true or false
 end
 
 function M:add_to_queue(player, uri, mdata, beginning)
     log.info("adding to queue on "..player.." uri "..uri)
-    return self:cmd(player, 'AddURIToQueue', {EnqueuedURI = uri, EnqueuedURIMetaData = (mdata or ""), DesiredFirstTrackNumberEnqueued = (beginning and 1 or 0)})
+    return self:cmd(player, 'AddURIToQueue', {EnqueuedURI = uri, EnqueuedURIMetaData = (mdata or ""), DesiredFirstTrackNumberEnqueued = (beginning and 1 or 0)}) and true or false
 end
 
 function M:set_media(player, media)
-    if isRadio(media.uri) then
+    if metadata.is_radio(media.uri) then
         return self:set_uri(media.uri, media.metadata)
     end
     local p = assert(self:get_player(player))
@@ -509,7 +524,7 @@ function M:whats_playing(player)
     local response = self:cmd(player, 'GetPositionInfo')
     if response then
         log.debug(utils.stringify_table(response))
-        result = metadata.parse_didl(response.TrackMetaData, player, SONOS_HTTP_PORT)
+        result = metadata.parse_didl(response.TrackMetaData, player, config.SONOS_HTTP_PORT)
         if (result) then
             result = result[1]
             result.num = response.TrackNum
@@ -521,6 +536,38 @@ function M:whats_playing(player)
         end
     end
     return result
+end
+
+function M:get_play_mode(player)
+    local result = self:cmd(player, 'GetTransportInfo')
+    return result and result.CurrentTransportState or nil
+end
+
+function M:get_state(player)
+    local result = {}
+    result.playing = self:whats_playing(player)
+    result.mute = self:get_mute(player)
+    result.volume = self:get_volume(player)
+    result.state = self:get_play_mode(player)
+    return result
+end
+
+function M:update(metadata)
+    if metadata then
+        if not self.last_updated or (metadata.last_updated and metadata.last_updated > self.last_updated) then
+            if metadata.players then self.players = metadata.players end        
+            if metadata.playlists then self.playlists = metadata.playlists end      
+            if metadata.favorites then self.favorites = metadata.favorites end
+        end
+    else
+        if not self.last_updated or os.time() - self.last_updated > config.PLAYER_UPDATE_MAX_FREQUENCY then
+            self:find_players()
+            self:find_favorites()
+            self:find_playlists()
+            self.last_updated = os.time()
+        end
+    end
+    return true  
 end
 
 return M

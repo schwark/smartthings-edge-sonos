@@ -63,6 +63,14 @@ local function get_upnp_class(parentid)
   return classes[parentid] or ''
 end
 
+function M.is_radio(uri)
+  return uri:match('x-sonosapi-stream:') or
+    uri:match('x-sonosapi-radio:') or
+    uri:match('pndrradio:') or
+    uri:match('x-sonosapi-hls:') or
+    uri:match('x-sonosprog-http:');
+end
+
 function M.parse_didl(didl, host, port)
   if (not didl or not didl:match('^<DIDL')) then return nil end
   log.debug('Parsing DIDL...')
