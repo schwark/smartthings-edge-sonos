@@ -9,7 +9,7 @@ config.MANUFACTURER='Sonos'
 config.PLAYER_UPDATE_SCHEDULE_PERIOD=600
 config.PLAYER_UPDATE_MAX_FREQUENCY=600
 config.STATE_UPDATE_SCHEDULE_PERIOD=15
-
+config.FILTER_SPEAKERS='Master Bedroom'
 --config.URN='urn:schemas-upnp-org:device:ZonePlayer:1'
 config.URN='urn:smartspeaker-audio:service:SpeakerGroup:1'
 -- SSDP Config

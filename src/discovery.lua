@@ -2,6 +2,7 @@ local log = require "log"
 local config = require("config")
 local Sonos = require("sonos.soap")
 local utils = require("st.utils")
+local socket = require('socket')
 local discovery = {}
 
 local function create_device(driver, device)
@@ -28,8 +29,9 @@ function discovery.start(driver, opts, cons)
   if(sonos.players) then
     for i, each in ipairs(sonos.players) do
         log.info('Found '..each.id..' at '..each.ip.." named "..(each.name or "nil"))
-        if(each.name and each.name:match('Master Bedroom')) then
+        if(each.name and each.name:match(config.FILTER_SPEAKERS)) then
           create_device(driver, each)
+          socket.sleep(2)
         end
     end
   else
