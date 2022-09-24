@@ -3,6 +3,7 @@ local config = require("config")
 local Sonos = require("sonos.soap")
 local utils = require("st.utils")
 local socket = require('socket')
+local commands = require('commands')
 local discovery = {}
 
 local function create_device(driver, device)
@@ -23,11 +24,17 @@ local function create_device(driver, device)
   return driver:try_create_device(metadata)
 end
 
-function discovery.start(driver, opts, cons)
+local function get_players(driver, force)
   local sonos = Sonos()
-  sonos:update(driver.player_cache)
-  if(sonos.players) then
-    for i, each in ipairs(sonos.players) do
+  assert(driver.player_cache)
+  sonos:update(driver.player_cache, force)
+  return sonos.players
+end
+
+function discovery.start(driver, opts, cons)
+  local players = get_players(driver, true)
+  if(players) then
+    for i, each in ipairs(players) do
         log.info('Found '..each.id..' at '..each.ip.." named "..(each.name or "nil"))
         if(each.name and each.name:match(config.FILTER_SPEAKERS)) then
           create_device(driver, each)

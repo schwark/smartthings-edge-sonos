@@ -1,14 +1,49 @@
 local capabilities = require "st.capabilities"
 local Driver = require "st.driver"
-local commands = require('commands')
 local log = require "log"
 
 local discovery = require('discovery')
 local commands = require('commands')
 local lifecycles = require('lifecycles')
+local config = require('config')
+
+local function setup_timer(driver)
+  local success = false
+  if not driver.player_cache.timer then
+    local timer = driver:call_on_schedule(
+      config.PLAYER_UPDATE_SCHEDULE_PERIOD,
+      function ()
+        return commands.handle_player_refresh(driver)
+      end,
+    'Player Refresh schedule')
+    if (driver.player_cache.timer) then -- someone else already set it up..
+      driver:cancel_timer(timer)
+    else
+      driver.player_cache.timer = timer
+      success = true
+    end
+  end
+  return success
+end
+
+local function cancel_timer(driver, timer)
+  if driver.player_cache.timer then
+    driver:cancel_timer(timer or driver.player_cache.timer)
+    driver.player_cache.timer = timer and driver.player_cache.timer or nil
+  end
+end
+
+local function driver_lifecycle(driver, event)
+  if('shutdown' == event) then
+    driver:cancel_timer()
+  end
+end
 
 local driver = Driver("Sonos LAN", {
     player_cache = {},
+    setup_timer = setup_timer,
+    cancel_timer = cancel_timer,
+    driver_lifecycle = driver_lifecycle,
     discovery = discovery.start,
     lifecycle_handlers = lifecycles,
     supported_capabilities = {

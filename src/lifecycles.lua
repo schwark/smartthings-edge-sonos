@@ -21,6 +21,12 @@ function lifecycle_handler.init(driver, device)
         return commands.handle_refresh(driver, device)
     end,
     'Refresh schedule')
+  
+    if driver:setup_timer() then
+    commands.handle_player_refresh(driver)
+  end
+
+  commands.handle_faves_refresh(driver, device)
   --[[  
   device.thread:call_on_schedule(
     config.PLAYER_UPDATE_SCHEDULE_PERIOD,
@@ -41,12 +47,16 @@ function lifecycle_handler.added(driver, device)
   commands.handle_added(driver, device)
 end
 
-function lifecycle_handler.removed(_, device)
+function lifecycle_handler.removed(driver, device)
   -- Remove Schedules created under
   -- device.thread to avoid unnecessary
   -- CPU processing.
   for timer in pairs(device.thread.timers) do
     device.thread:cancel_timer(timer)
+  end
+  local devices = driver:get_devices()
+  if not devices or #devices == 0 then
+    driver:cancel_timer()
   end
 end
 

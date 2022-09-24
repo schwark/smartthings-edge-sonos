@@ -27,9 +27,7 @@ local function get_cached(cache, var)
         end
     end
     --]]
-    local result = cache and cache[var..'_updated']
-            and os.time() - cache[var..'_updated'] < config.PLAYER_UPDATE_MAX_FREQUENCY 
-            and cache[var] or nil
+    local result = cache and cache[var] or nil
     --[[
     if not result and cache then
         log.info('mutexing trying to get '..var)
@@ -151,6 +149,14 @@ local types = {
     }
 }
 
+local muted_calls = {
+    GetMediaInfo = true,
+    GetMute = true,
+    GetPositionInfo = true,
+    GetTransportInfo = true,
+    GetVolume = true,
+}
+
 local function get_command_meta(command)
     local result = nil
     for type, meta in pairs(types) do
@@ -235,10 +241,10 @@ end
 -- Socket and broadcast a single
 -- M-SEARCH request, i.e., it
 -- must be looped appart.
-function M:find_players(cache)
+function M:find_players(cache, force)
     --log.debug(debug.traceback(utils.stringify_table(cache)))
     local result = get_cached(cache, 'players') or {}
-    if next(result) then return result end
+    if not force and next(result) then return result end
 
     -- UDP socket initialization
     local upnp = socket.udp()
@@ -269,6 +275,8 @@ function M:find_players(cache)
                 if name then
                     log.info(id..': found sonos player at '..ip..' named '..name)
                     table.insert(result, {ip = ip, id = id, name = name, household = household})
+                else
+                    table.insert(ips, ip)
                 end
             end
         end
@@ -277,15 +285,15 @@ function M:find_players(cache)
     -- close udp socket
     upnp:close()
 
-    --[[
-    for _, ip in ipairs(ips) do
-        local player = self:init_player(ip)
-        if player then 
-            log.info('found a sonos speaker at '..player.ip..' named '..player.name)
-            table.insert(result, player) 
+    if not next(result) then
+        for _, ip in ipairs(ips) do
+            local player = self:init_player(ip)
+            if player then 
+                log.info('found a sonos speaker at '..player.ip..' named '..player.name)
+                table.insert(result, player) 
+            end
         end
     end
-    --]]
 
     self.players = result
     if result then set_cached(cache, 'players', result) end
@@ -349,7 +357,9 @@ function M:cmd(player, command, params)
         ['Content-Type'] = 'text/xml; charset="utf-8"',
         ['Content-Length'] = #body
     }
-    log.debug("executing on "..player.name.." command "..command.." with params "..(params and utils.stringify_table(params) or "none"))
+    if not muted_calls[command] then
+        log.debug("executing on "..player.name.." command "..command.." with params "..(params and utils.stringify_table(params) or "none"))
+    end
     --log.debug(utils.stringify_table(headers))
     --log.debug(body)
 
@@ -395,13 +405,6 @@ function M:cmd(player, command, params)
     return result
 end
 
-function M:get_players(force)
-    if not self.players or force then
-        self:update()
-    end
-    return self.players
-end
-
 function M:any_player()
     return self:get_player()
 end
@@ -410,34 +413,33 @@ function M:get_player(name)
     if name and name:match('%d+%.%d+%.%d+%.%d+') then -- is an ip address
         return self:init_player(name)
     end
-    local force = false
-    for i=1,2 do -- sometimes only 1 player responds, so retry in that case
-        local players = self:get_players(force)
-        if players then
-            if not name or "" == name then -- any player will do
-                return players[math.random(#players)]
-            end
-            name = name:gsub('uuid:','')
-            for i, item in ipairs(players) do
-                if item.name:lower() == name:lower() then return item end
-                if item.id == name then return item end
-            end
+    local players = assert(self.players)
+    if players then
+        if not name or "" == name then -- any player will do
+            return players[math.random(#players)]
         end
-        force = true
+        name = name:gsub('uuid:','')
+        for i, item in ipairs(players) do
+            if item.name:lower() == name:lower() then return item end
+            if item.id == name then return item end
+        end
     end
     return nil
 end
 
-function M:browse(player, term)
+function M:browse(term)
     local result = nil
     local i = 0
+    local player = assert(self:any_player())
     repeat
         local didl
         local status, err = pcall( function () 
-            didl = self:cmd(player,'Browse', {ObjectID = term})
+            didl = self:cmd(player.id,'Browse', {ObjectID = term})
             if not didl or not didl['Result'] then return nil else didl = didl['Result'] end
-            local p = assert(self:get_player(player))
-            result = metadata.parse_didl(didl, p.ip, config.SONOS_HTTP_PORT)
+            if didl:match('&gt;<') then -- fix a common problem with the return xml
+                didl = didl:gsub('&gt;<','><')
+            end
+            result = metadata.parse_didl(didl, player.ip, config.SONOS_HTTP_PORT)
             --log.debug(result and utils.stringify_table(result) or "nil")
         end)
         i = i + 1
@@ -449,20 +451,20 @@ function M:browse(player, term)
     return result
 end
 
-function M:find_favorites(cache, player)
+function M:find_favorites(cache, force)
     local result = get_cached(cache, 'favorites') or {}
-    if next(result) then return result end
+    if not force and next(result) then return result end
     log.info('getting favorites...')
-    self.favorites = self:browse(player, 'FV:2')
+    self.favorites = self:browse('FV:2')
     if self.favorites then set_cached(cache, 'favorites', self.favorites) end
     return self.favorites
 end
 
-function M:find_playlists(cache, player)
+function M:find_playlists(cache, force)
     local result = get_cached(cache, 'playlists') or {}
-    if next(result) then return result end
+    if not force and next(result) then return result end
     log.info('getting playlists...')
-    self.playlists = self:browse(player, 'SQ:')
+    self.playlists = self:browse('SQ:')
     if self.playlists then set_cached(cache, 'playlists', self.playlists) end
     return self.playlists
 end
@@ -597,7 +599,6 @@ end
 
 function M:whats_playing(player)
     local result = nil
-    log.info("getting current playing on "..player)
     local response = self:cmd(player, 'GetPositionInfo')
     if response then
         --log.debug(utils.stringify_table(response))
@@ -642,11 +643,15 @@ function M:get_state(player)
     return result
 end
 
-function M:update(cache)
-    self:find_players(cache)
-    self:find_favorites(cache)
-    self:find_playlists(cache)
-    return cache  
+function M:update(cache, force)
+    self:find_players(cache, force)
+    self:find_favorites(cache, force)
+    self:find_playlists(cache, force)
+    local updated = force and self.players and next(self.players)
+    if cache then
+        cache.last_updated = updated and os.time() or cache.last_updated
+    end
+    return updated
 end
 
 return M

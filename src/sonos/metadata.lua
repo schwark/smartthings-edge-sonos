@@ -153,7 +153,6 @@ end
 
 function M.parse_didl(didl, host, port)
   if (type(didl) == 'table' or not didl or not didl:match('^<DIDL')) then return nil end
-  log.debug('Parsing DIDL...')
   local result = nil
 
   local result_handler = xml_handler:new()
