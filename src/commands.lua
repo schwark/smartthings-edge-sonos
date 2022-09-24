@@ -13,11 +13,7 @@ local function is_empty(var)
     return not var or "" == var or tostring(var):match('userdata')
 end
 
-function command_handlers.handle_added(driver, device)
-    command_handlers.handle_refresh(driver, device)
-    device:emit_event(capabilities.switchLevel.level(0))
-    device:emit_event(capabilities.mediaPlayback.supportedPlaybackCommands({'play','stop','pause'}))
-    local sonos = assert(command_handlers.get_sonos(driver, device))
+local function get_presets(sonos)
     local presets = {}
     for _, list in ipairs({sonos.playlists, sonos.favorites}) do
         if list then
@@ -26,9 +22,13 @@ function command_handlers.handle_added(driver, device)
             end
         end
     end
-    if next(presets) then
-        device:emit_event(capabilities.mediaPresets.presets(presets))
-    end
+    return presets
+end
+
+function command_handlers.handle_added(driver, device)
+    command_handlers.handle_refresh(driver, device)
+    device:emit_event(capabilities.switchLevel.level(0))
+    device:emit_event(capabilities.mediaPlayback.supportedPlaybackCommands({'play','stop','pause'}))
 end
 
 function command_handlers.get_sonos(driver, device)
@@ -49,10 +49,15 @@ end
 
 function command_handlers.handle_player_refresh(driver, device)
     if not driver then return nil end
-    log.info("updating players and playlists for "..(device and device.label or "nil"))
     local sonos = device and device:get_field('sonos') or Sonos()
     if sonos then
         sonos:update(driver.player_cache)
+        if device then
+            local presets = get_presets(sonos)
+            if next(presets) then
+                device:emit_event(capabilities.mediaPresets.presets(presets))
+            end
+        end
     end
 end
 
@@ -191,6 +196,7 @@ function command_handlers.handle_refresh(driver, device)
     local success = false
     local sonos = command_handlers.get_sonos(driver, device)
     if sonos then
+        command_handlers.handle_player_refresh(driver, device)
         local state = sonos:get_state(device.device_network_id)
         if state then
             local mute_states = {'unmuted', 'muted'}
@@ -213,9 +219,11 @@ function command_handlers.handle_refresh(driver, device)
             update_state(device, 'audioTrackData', 'elapsedTime', position)
             log.debug(utils.stringify_table(state))
             local track_nav = {}
-            local has_next = state.playing.num and state.playing.num_tracks and state.playing.num < state.playing.num_tracks and table.insert(track_nav, 'nextTrack')
-            local has_prev = state.playing.num and state.playing.num > 1 and table.insert(track_nav, 'previousTrack')
-            update_state(device, 'mediaTrackControl', 'supportedTrackControlCommands', track_nav)
+            if state.playing then
+                local has_next = state.playing.num and state.playing.num_tracks and state.playing.num < state.playing.num_tracks and table.insert(track_nav, 'nextTrack')
+                local has_prev = state.playing.num and state.playing.num > 1 and table.insert(track_nav, 'previousTrack')
+                update_state(device, 'mediaTrackControl', 'supportedTrackControlCommands', track_nav)
+            end
             local track = state.playing and
             {   
                 title = state.playing.title,

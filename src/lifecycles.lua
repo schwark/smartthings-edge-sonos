@@ -21,12 +21,14 @@ function lifecycle_handler.init(driver, device)
         return commands.handle_refresh(driver, device)
     end,
     'Refresh schedule')
+  --[[  
   device.thread:call_on_schedule(
     config.PLAYER_UPDATE_SCHEDULE_PERIOD,
     function ()
         return commands.handle_player_refresh(driver, device)
     end,
     'Refresh schedule')
+  --]]
 end
 
 function lifecycle_handler.added(driver, device)

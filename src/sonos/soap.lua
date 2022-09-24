@@ -14,15 +14,39 @@ local xmlutil = require('xmlutil')
 local metadata = require('sonos.metadata')
 
 local function get_cached(cache, var)
-    return cache and cache[var..'_updated']
+    --[[
+    local i = 0
+    while cache and cache[var..'updating'] do
+        log.info('waiting for other thread to finish getting '..var)
+        -- wait for the other update to finish
+        socket.sleep(5)
+        i = i + 1
+        if i > 20 then
+            log.info('giving up waiting for other thread to finish getting '..var)
+            cache[var..'updating'] = nil -- something must be stuck on the other thread
+        end
+    end
+    --]]
+    local result = cache and cache[var..'_updated']
             and os.time() - cache[var..'_updated'] < config.PLAYER_UPDATE_MAX_FREQUENCY 
             and cache[var] or nil
+    --[[
+    if not result and cache then
+        log.info('mutexing trying to get '..var)
+        cache[var..'updating'] = os.time()
+    end
+    --]]
+    return result
 end
 
 local function set_cached(cache, var, value)
     if not cache then return nil end
     cache[var] = value
     cache[var..'_updated'] = os.time()
+    --[[
+    log.info('clearing mutex trying to get '..var)
+    cache[var..'updating'] = nil
+    --]]
 end
 
 local errors = {
@@ -167,12 +191,13 @@ end
 local function get_config(ip)
     local res = {}
     local url = 'http://'..ip..':'..config.SONOS_HTTP_PORT..'/xml/group_description.xml'
-    --log.info('getting config '..url)
+    log.debug('getting config '..url)
     local _, status = http.request({
       url=url,
       sink=ltn12.sink.table(res)
     })
-  
+    log.debug('got config '..url)
+
     if next(res) then 
         -- XML Parser
         local xmlres = xml_handler:new()
@@ -190,13 +215,14 @@ end
 local function parse_ssdp(data)
     local res = {}
     res.status = data:sub(0, data:find('\r\n'))
-    for k, v in data:gmatch('([%w-]+):[%s]+([%w+-:%. /=]+)') do
+    for k, v in data:gmatch('([%w%-%.]+):[%s]+([%w%+%-%:%.; /=_"]+)') do
       res[k:lower()] = v
     end
     return res
 end
 
 function M:init_player(ip)
+    log.info('init player for '..ip)
     local meta = get_config(ip)
     --log.debug("meta for "..ip.." is "..utils.stringify_table(meta))
     if meta and type(meta.friendlyName) == 'string' and meta.friendlyName and "" ~= meta.friendlyName then
@@ -237,13 +263,21 @@ function M:find_players(cache)
             res = parse_ssdp(res)
             if(res and res.st and config.URN == res.st) then
                 log.info('got a SSDP response from '..ip)
-                table.insert(ips, ip)
+                local id = res.usn:gsub('::urn.+',''):gsub('uuid:','')
+                local name = res['groupinfo.smartspeaker.audio']:match('gname="([^"]+)')
+                local household = res['household.smartspeaker.audio']
+                if name then
+                    log.info(id..': found sonos player at '..ip..' named '..name)
+                    table.insert(result, {ip = ip, id = id, name = name, household = household})
+                end
             end
         end
     until err
+    log.debug('got all the SSDP responses we will get...')
     -- close udp socket
     upnp:close()
 
+    --[[
     for _, ip in ipairs(ips) do
         local player = self:init_player(ip)
         if player then 
@@ -251,6 +285,7 @@ function M:find_players(cache)
             table.insert(result, player) 
         end
     end
+    --]]
 
     self.players = result
     if result then set_cached(cache, 'players', result) end
@@ -318,7 +353,7 @@ function M:cmd(player, command, params)
     --log.debug(utils.stringify_table(headers))
     --log.debug(body)
 
-    local _, status = http.request({
+    local req_result, code, headers, status = http.request({
       url=url,
       method = 'POST',
       headers = headers,
@@ -327,7 +362,7 @@ function M:cmd(player, command, params)
     })
   
     local result
-    if 200 == status then
+    if 200 == code then
         -- XML Parser
         local xmlres = xml_handler:new()
         local xml_parser = xml2lua.parser(xmlres)
@@ -346,14 +381,14 @@ function M:cmd(player, command, params)
         --log.debug(utils.stringify_table(result))     
     else
         result = nil
-        if 500 == status then
+        if 500 == code then
             local xmlres = xml_handler:new()
             local xml_parser = xml2lua.parser(xmlres)
             xml_parser:parse(table.concat(res))
-            local code = xmlres.root['s:Envelope']['s:Body']['s:Fault']['detail']['UPnPError']['errorCode']
-            log.error("error code "..(code or "nil").." "..(code and errors[code] or "nil"))
+            local err = xmlres.root['s:Envelope']['s:Body']['s:Fault']['detail']['UPnPError']['errorCode']
+            log.error(command.." error code "..(err or "nil").." "..(code and errors[err] or "nil"))
         else 
-            log.error(table.concat(res))
+            log.error(command..' error with code '..tostring(code)..', status '..tostring(status)..' and content '..table.concat(res))
         end
     end
 
@@ -380,7 +415,7 @@ function M:get_player(name)
         local players = self:get_players(force)
         if players then
             if not name or "" == name then -- any player will do
-                return players[1]
+                return players[math.random(#players)]
             end
             name = name:gsub('uuid:','')
             for i, item in ipairs(players) do
@@ -389,7 +424,6 @@ function M:get_player(name)
             end
         end
         force = true
-        socket.sleep(5)
     end
     return nil
 end
@@ -398,10 +432,10 @@ function M:browse(player, term)
     local result = nil
     local i = 0
     repeat
+        local didl
         local status, err = pcall( function () 
-            local didl = self:cmd(player,'Browse', {ObjectID = term})
+            didl = self:cmd(player,'Browse', {ObjectID = term})
             if not didl or not didl['Result'] then return nil else didl = didl['Result'] end
-            --log.debug(didl)
             local p = assert(self:get_player(player))
             result = metadata.parse_didl(didl, p.ip, config.SONOS_HTTP_PORT)
             --log.debug(result and utils.stringify_table(result) or "nil")
@@ -409,6 +443,7 @@ function M:browse(player, term)
         i = i + 1
         if not status then
             log.info('browse failed due to '..tostring(err)..' : retrying ..')
+            log.debug(didl)
         end
     until status or i > 1
     return result
@@ -587,7 +622,7 @@ function M:whats_playing(player)
         end
     end
     response = self:cmd(player, 'GetMediaInfo')
-    if response then
+    if response and result then
         result.num_tracks = response.NrTracks and tonumber(response.NrTracks)
     end
     return result

@@ -152,7 +152,7 @@ function M.duration_in_seconds(str)
 end
 
 function M.parse_didl(didl, host, port)
-  if (not didl or not didl:match('^<DIDL')) then return nil end
+  if (type(didl) == 'table' or not didl or not didl:match('^<DIDL')) then return nil end
   log.debug('Parsing DIDL...')
   local result = nil
 
@@ -201,11 +201,11 @@ function M.parse_didl(didl, host, port)
     end
 
     if (didl_item.res) then
-      track.duration = didl_item.res._attr.duration
+      track.duration = didl_item.res._attr and didl_item.res._attr.duration or nil
       track.uri = didl_item.res[1]
       track.service = M.guess_service(track)
       track.type = M.guess_type(track)
-      track.protocol_info = didl_item.res._attr.protocolInfo
+      track.protocol_info = didl_item.res._attr and didl_item.res._attr.protocolInfo or nil
     end
 
     if (didl_item['r:resMD']) then
