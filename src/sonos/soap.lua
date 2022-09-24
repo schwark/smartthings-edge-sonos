@@ -1,7 +1,7 @@
 local socket = require('socket')
 local cosock = require "cosock"
 local http = cosock.asyncify "socket.http"
-local http = require("socket.http")
+--local http = require('socket.http')
 local utils = require("st.utils")
 local ltn12 = require('ltn12')
 -- XML modules
@@ -9,12 +9,21 @@ local xml2lua = require "xml2lua"
 local xml_handler = require "xmlhandler.tree"
 
 local log = require "log"
-local math = require ('math')
 local config = require('config')
 local xmlutil = require('xmlutil')
 local metadata = require('sonos.metadata')
 
+local function get_cached(cache, var)
+    return cache and cache[var..'_updated']
+            and os.time() - cache[var..'_updated'] < config.PLAYER_UPDATE_MAX_FREQUENCY 
+            and cache[var] or nil
+end
 
+local function set_cached(cache, var, value)
+    if not cache then return nil end
+    cache[var] = value
+    cache[var..'_updated'] = os.time()
+end
 
 local errors = {
         ["400"] = "Bad request" ,
@@ -138,10 +147,9 @@ local M = {}; M.__index = M
 
 local function constructor(self,o)
     o = o or {}
-    o.players = nil
-    o.favorites = nil
-    o.playlists = nil
-    o.last_updated = nil
+    o.players = o.players or nil
+    o.favorites = o.favorites or nil
+    o.playlists = o.playlists or nil
     setmetatable(o, M)
     return o
 end
@@ -159,18 +167,23 @@ end
 local function get_config(ip)
     local res = {}
     local url = 'http://'..ip..':'..config.SONOS_HTTP_PORT..'/xml/group_description.xml'
+    --log.info('getting config '..url)
     local _, status = http.request({
       url=url,
       sink=ltn12.sink.table(res)
     })
   
-    -- XML Parser
-    local xmlres = xml_handler:new()
-    local xml_parser = xml2lua.parser(xmlres)
-    xml_parser:parse(table.concat(res))
-  
-    -- Device metadata
-    return xmlres.root.root.device
+    if next(res) then 
+        -- XML Parser
+        local xmlres = xml_handler:new()
+        local xml_parser = xml2lua.parser(xmlres)
+        xml_parser:parse(table.concat(res))
+
+        -- Device metadata
+        return xmlres.root.root.device
+    else
+        log.error(status)
+    end
 end
 
 -- SSDP Response parser
@@ -186,8 +199,7 @@ end
 function M:init_player(ip)
     local meta = get_config(ip)
     --log.debug("meta for "..ip.." is "..utils.stringify_table(meta))
-    if meta and meta.friendlyName and "" ~= meta.friendlyName then
-        log.info("sonos speaker "..meta.friendlyName.." at "..ip)
+    if meta and type(meta.friendlyName) == 'string' and meta.friendlyName and "" ~= meta.friendlyName then
         return {ip=ip, id=meta.UDN:gsub('uuid:',''), name=meta.friendlyName}                   
     end
     return nil
@@ -197,7 +209,11 @@ end
 -- Socket and broadcast a single
 -- M-SEARCH request, i.e., it
 -- must be looped appart.
-function M:find_players()
+function M:find_players(cache)
+    --log.debug(debug.traceback(utils.stringify_table(cache)))
+    local result = get_cached(cache, 'players') or {}
+    if next(result) then return result end
+
     -- UDP socket initialization
     local upnp = socket.udp()
     upnp:setsockname('*', 0)
@@ -211,33 +227,34 @@ function M:find_players()
     -- based on the s:setoption(n)
     -- to receive a response back.
     local err
-    local result = {}
+    log.debug("discovering sonos speakers...")
+    local ips = {}
     repeat
-        log.debug("discovering sonos speakers...")
         local res, ip = upnp:receivefrom()
         if nil == res then
             err = ip
         else
             res = parse_ssdp(res)
             if(res and res.st and config.URN == res.st) then
-                local player = self:init_player(ip)
-                if player then 
-                    log.info('found a zone at '..player.ip..' named '..player.name)
-                    table.insert(result, player) 
-                end
+                log.info('got a SSDP response from '..ip)
+                table.insert(ips, ip)
             end
         end
     until err
-
     -- close udp socket
     upnp:close()
-    self.players = result
-    return next(result) and result or nil
-end
-  
 
-function M:discover()
-    return self:update()
+    for _, ip in ipairs(ips) do
+        local player = self:init_player(ip)
+        if player then 
+            log.info('found a sonos speaker at '..player.ip..' named '..player.name)
+            table.insert(result, player) 
+        end
+    end
+
+    self.players = result
+    if result then set_cached(cache, 'players', result) end
+    return next(result) and result or nil
 end
 
 local function get_request_body(command)
@@ -299,7 +316,7 @@ function M:cmd(player, command, params)
     }
     log.debug("executing on "..player.name.." command "..command.." with params "..(params and utils.stringify_table(params) or "none"))
     --log.debug(utils.stringify_table(headers))
-    log.debug(body)
+    --log.debug(body)
 
     local _, status = http.request({
       url=url,
@@ -343,8 +360,8 @@ function M:cmd(player, command, params)
     return result
 end
 
-function M:get_players()
-    if not self.players then
+function M:get_players(force)
+    if not self.players or force then
         self:update()
     end
     return self.players
@@ -358,36 +375,60 @@ function M:get_player(name)
     if name and name:match('%d+%.%d+%.%d+%.%d+') then -- is an ip address
         return self:init_player(name)
     end
-    local players = self:get_players()
-    if players then
-        if not name or "" == name then -- any player will do
-            return players[1]
+    local force = false
+    for i=1,2 do -- sometimes only 1 player responds, so retry in that case
+        local players = self:get_players(force)
+        if players then
+            if not name or "" == name then -- any player will do
+                return players[1]
+            end
+            name = name:gsub('uuid:','')
+            for i, item in ipairs(players) do
+                if item.name:lower() == name:lower() then return item end
+                if item.id == name then return item end
+            end
         end
-        name = name:gsub('uuid:','')
-        for i, item in ipairs(players) do
-            if item.name:lower() == name:lower() then return item end
-            if item.id == name then return item end
-        end
+        force = true
+        socket.sleep(5)
     end
     return nil
 end
 
 function M:browse(player, term)
-    local didl = self:cmd(player,'Browse', {ObjectID = term})
-    if not didl or not didl['Result'] then return nil else didl = didl['Result'] end
-    --log.debug(didl)
-    local result = metadata.parse_didl(didl, player, config.SONOS_HTTP_PORT)
-    log.debug(result and utils.stringify_table(result) or "nil")
+    local result = nil
+    local i = 0
+    repeat
+        local status, err = pcall( function () 
+            local didl = self:cmd(player,'Browse', {ObjectID = term})
+            if not didl or not didl['Result'] then return nil else didl = didl['Result'] end
+            --log.debug(didl)
+            local p = assert(self:get_player(player))
+            result = metadata.parse_didl(didl, p.ip, config.SONOS_HTTP_PORT)
+            --log.debug(result and utils.stringify_table(result) or "nil")
+        end)
+        i = i + 1
+        if not status then
+            log.info('browse failed due to '..tostring(err)..' : retrying ..')
+        end
+    until status or i > 1
     return result
 end
 
-function M:find_favorites(player)
+function M:find_favorites(cache, player)
+    local result = get_cached(cache, 'favorites') or {}
+    if next(result) then return result end
+    log.info('getting favorites...')
     self.favorites = self:browse(player, 'FV:2')
+    if self.favorites then set_cached(cache, 'favorites', self.favorites) end
     return self.favorites
 end
 
-function M:find_playlists(player)
+function M:find_playlists(cache, player)
+    local result = get_cached(cache, 'playlists') or {}
+    if next(result) then return result end
+    log.info('getting playlists...')
     self.playlists = self:browse(player, 'SQ:')
+    if self.playlists then set_cached(cache, 'playlists', self.playlists) end
     return self.playlists
 end
 
@@ -434,7 +475,7 @@ end
 
 function M:get_volume(player) 
     local result = self:cmd(player, 'GetVolume')
-    return result and result.CurrentVolume or nil
+    return result and result.CurrentVolume and tonumber(result.CurrentVolume) or nil
 end
 
 function M:set_volume(player, volume) -- number between 0 and 100
@@ -474,7 +515,7 @@ end
 local function clean_name(name)
     if not name then return name end
     local result = name:lower()
-    result = result:gsub("[%s,'\"_%-]+","")
+    result = result:gsub("[%s,%.'\"_%-]+","")
     return result
 end
 
@@ -482,9 +523,10 @@ function M:find_media_by_field(pname, field)
     local plist = nil
     pname = clean_name(pname)
     for _, list in ipairs({self.playlists, self.favorites}) do
+        log.debug("searching "..utils.stringify_table(list))
         for i, item in ipairs(list) do
-            --log.debug("searching "..item.name.." for "..pname)
-            if pname == clean_name(item[field]) then
+            log.debug("searching "..item.title.." for "..pname)
+            if clean_name(item[field]):match(pname) then
                 log.info("found media "..item.title)
                 plist = item
                 break
@@ -498,12 +540,12 @@ end
 
 function M:play_media_by_name(player, pname, replace)
     assert(self:set_media_by_name(player, pname, replace))
-    return self:play()
+    return self:play(player)
 end
 
 function M:play_media_by_id(player, pid, replace)
     assert(self:set_media_by_id(player, pid, replace))
-    return self:play()
+    return self:play(player)
 end
 
 function M:set_media_by_name(player, pname, replace)
@@ -523,17 +565,30 @@ function M:whats_playing(player)
     log.info("getting current playing on "..player)
     local response = self:cmd(player, 'GetPositionInfo')
     if response then
-        log.debug(utils.stringify_table(response))
-        result = metadata.parse_didl(response.TrackMetaData, player, config.SONOS_HTTP_PORT)
+        --log.debug(utils.stringify_table(response))
+        local p = assert(self:get_player(player))
+        result = metadata.parse_didl(response.TrackMetaData, p.ip, config.SONOS_HTTP_PORT)
         if (result) then
             result = result[1]
-            result.num = response.TrackNum
+            result.num = response.Track and tonumber(response.Track)
             if not result.duration then
                 result.duration = response.TrackDuration
             end
+            result.duration = metadata.duration_in_seconds(result.duration)
             result.metadata = response.TrackMetaData
-            result.position = response.RelTime            
+            result.position = metadata.duration_in_seconds(response.RelTime)
+            if result.title:match('preroll') then
+                result.title = 'Pre-Roll Advertisement'
+                result.album = 'Advertising'
+                result.artist = 'Advertiser'
+                result.type = 'Advertisement'
+                result.service = result.service or 'Sonos'
+            end
         end
+    end
+    response = self:cmd(player, 'GetMediaInfo')
+    if response then
+        result.num_tracks = response.NrTracks and tonumber(response.NrTracks)
     end
     return result
 end
@@ -552,22 +607,11 @@ function M:get_state(player)
     return result
 end
 
-function M:update(metadata)
-    if metadata then
-        if not self.last_updated or (metadata.last_updated and metadata.last_updated > self.last_updated) then
-            if metadata.players then self.players = metadata.players end        
-            if metadata.playlists then self.playlists = metadata.playlists end      
-            if metadata.favorites then self.favorites = metadata.favorites end
-        end
-    else
-        if not self.last_updated or os.time() - self.last_updated > config.PLAYER_UPDATE_MAX_FREQUENCY then
-            self:find_players()
-            self:find_favorites()
-            self:find_playlists()
-            self.last_updated = os.time()
-        end
-    end
-    return true  
+function M:update(cache)
+    self:find_players(cache)
+    self:find_favorites(cache)
+    self:find_playlists(cache)
+    return cache  
 end
 
 return M

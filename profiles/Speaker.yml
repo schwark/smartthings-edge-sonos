@@ -4,7 +4,15 @@ components:
   capabilities:
   - id: audioMute
     version: 1
+  - id: audioTrackData
+    version: 1
   - id: audioStream
+    version: 1
+  - id: mediaPlayback
+    version: 1
+  - id: mediaPresets
+    version: 1
+  - id: mediaTrackControl
     version: 1
   - id: audioNotification
     version: 1
@@ -19,14 +27,6 @@ components:
   categories:
   - name: NetworkAudio
 preferences:
-  - title: "Current Favorite/Playlist"
-    name: current
-    description: "Name of Current Favorite/Playlist"
-    required: false
-    preferenceType: string
-    definition:
-      stringType: text
-      default: ""
   - title: "Favorite/Playlist #1"
     name: song1
     description: "Name of Favorite/Playlist #1"

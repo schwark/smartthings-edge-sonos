@@ -4,7 +4,91 @@ local xml_handler = require "xmlhandler.tree"
 local utils = require("st.utils")
 local log = require "log"
 
+local music_services = {
+  ['38'] = '7digital',
+  ['321'] = '80s80s',
+  ['198'] = 'Anghami',
+  ['201'] = 'Apple Music',
+  ['204'] = 'Apple Music',
+  ['275'] = 'ARTRADIO',
+  ['306'] = 'Kollekt.fm',
+  ['239'] = 'Audible',
+  ['219'] = 'Audiobooks.com',
+  ['157'] = 'Bandcamp',
+  ['307'] = 'Bookmate',
+  ['283'] = 'Calm',
+  ['144'] = 'Calm Radio',
+  ['256'] = 'CBC Radio & Music',
+  ['191'] = 'Classical Archives',
+  ['315'] = 'Convoy Network',
+  ['213'] = 'Custom Channels',
+  ['2'] = 'Deezer',
+  ['234'] = 'deliver.media',
+  ['285'] = 'Epidemic Spaces',
+  ['182'] = 'FamilyStream',
+  ['217'] = 'FIT Radio Workout Music',
+  ['192'] = 'focus@will',
+  ['167'] = 'Gaana',
+  ['279'] = 'Global Player',
+  ['36'] = 'Hearts of Space',
+  ['45'] = 'hotelradio.fm',
+  ['310'] = 'iBroadcast',
+  ['271'] = 'IDAGIO',
+  ['300'] = 'JUKE',
+  ['305'] = 'Libby by OverDrive',
+  ['221'] = 'LivePhish+',
+  ['260'] = 'Minidisco',
+  ['181'] = 'Mixcloud',
+  ['171'] = 'Mood Mix',
+  ['33'] = 'Murfie',
+  ['262'] = 'My Cloud Home',
+  ['268'] = 'myTuner Radio',
+  ['203'] = 'Napster',
+  ['277'] = 'NRK Radio',
+  ['230'] = 'NTS Radio',
+  ['222'] = 'nugs.net',
+  ['324'] = 'Piraten.FM',
+  ['212'] = 'Plex',
+  ['233'] = 'Pocket Casts',
+  ['265'] = 'PowerApp',
+  ['31'] = 'Qobuz',
+  ['294'] = 'Radio Javan',
+  ['308'] = 'Radio Paradise',
+  ['264'] = 'radio.net',
+  ['154'] = 'Radionomy',
+  ['162'] = 'radioPup',
+  ['312'] = 'Radioshop',
+  ['223'] = 'RauteMusik.FM',
+  ['270'] = 'Relisten',
+  ['150'] = 'RUSC',
+  ['164'] = 'Saavn',
+  ['160'] = 'SoundCloud',
+  ['189'] = 'SOUNDMACHINE',
+  ['218'] = 'Soundsuit.fm',
+  ['295'] = 'Soundtrack Player',
+  ['9'] = 'Spotify',
+  ['163'] = 'Spreaker',
+  ['184'] = 'Stingray Music',
+  ['13'] = 'Stitcher',
+  ['237'] = 'storePlay',
+  ['226'] = 'Storytel',
+  ['235'] = 'Sveriges Radio',
+  ['211'] = 'The Music Manager',
+  ['174'] = 'TIDAL',
+  ['287'] = 'toníque',
+  ['169'] = 'Tribe of Noise',
+  ['254'] = 'TuneIn',
+  ['193'] = 'Tunify for Business',
+  ['231'] = 'Wolfgang\'s Music',
+  ['272'] = 'Worldwide FM',
+  ['317'] = 'Yogi Tunes',
+  ['284'] = 'YouTube Music',
+  ['999'] = 'My Music Library',
+  ['303'] = 'Sonos Radio',
+}
+
 local M = {}
+local st_metatable = getmetatable('')
 
 local function interp(s, tab)
   return (s:gsub('%%%((%a%w*)%)([-0-9%.]*[cdeEfgGiouxXsq])',
@@ -12,11 +96,9 @@ local function interp(s, tab)
           '%(' .. k .. ')' .. fmt
     end))
 end
+st_metatable.__mod = interp
 
-getmetatable("").__mod = interp
-
-
-local function matches(s, pattern)
+local function str_matches(s, pattern)
   local t = {}
   for v in string.gmatch(s, pattern) do
     table.insert(t, v)
@@ -24,10 +106,7 @@ local function matches(s, pattern)
   return t
 end
 
-getmetatable("").matches = matches
-
-
-local function split(s, separator)
+local function str_split(s, separator)
   local t = {}
   for v in string.gmatch(s, "[^" .. separator .. "]+") do
     table.insert(t, v)
@@ -35,21 +114,16 @@ local function split(s, separator)
   return t
 end
 
-getmetatable("").split = split
-
-local function trim_whitespace(s)
+local function str_trim(s)
   s = s:gsub('^%s+', '')
   s = s:gsub('%s+$', '')
   return s
 end
 
-getmetatable("").trim = trim_whitespace
 
-local function starts_with(s, prefix)
+local function str_starts_with(s, prefix)
   return s:match('^' .. prefix)
 end
-
-getmetatable("").starts_with = starts_with
 
 
 local function get_upnp_class(parentid)
@@ -65,10 +139,16 @@ end
 
 function M.is_radio(uri)
   return uri:match('x-sonosapi-stream:') or
-    uri:match('x-sonosapi-radio:') or
-    uri:match('pndrradio:') or
-    uri:match('x-sonosapi-hls:') or
-    uri:match('x-sonosprog-http:');
+      uri:match('x-sonosapi-radio:') or
+      uri:match('pndrradio:') or
+      uri:match('x-sonosapi-hls:') or
+      uri:match('x-sonosprog-http:');
+end
+
+function M.duration_in_seconds(str)
+  if not str then return nil end
+  local hours, minutes, seconds = str:match('(%d+):(%d+):(%d+)')
+  return seconds and tonumber(hours) * 60 * 60 + tonumber(minutes) * 60 + tonumber(seconds)
 end
 
 function M.parse_didl(didl, host, port)
@@ -98,15 +178,15 @@ function M.parse_didl(didl, host, port)
       protocol_info = ""
     }
     if (didl_item['r:streamContent'] and type(didl_item['r:streamContent']) == 'string' and track.Artist == nil) then
-      local streamContent = didl_item['r:streamContent']:split('-')
+      local streamContent = str_split(didl_item['r:streamContent'], '-')
       if (#streamContent == 2) then
-        track.artist = streamContent[1]:trim()
-        track.title = streamContent[2]:trim()
+        track.artist = str_trim(streamContent[1])
+        track.title = str_trim(streamContent[2])
       else
         track.artist = streamContent[1].trim()
         if (didl_item['r:radioShowMd'] and type(didl_item['r:radioShowMd']) == 'string') then
-          local radioShowMd = didl_item['r:radioShowMd']:split(',')
-          track.title = radioShowMd[1]:trim()
+          local radioShowMd = str_split(didl_item['r:radioShowMd'],',')
+          track.title = str_trim(radioShowMd[1])
         end
       end
     end
@@ -116,12 +196,15 @@ function M.parse_didl(didl, host, port)
       -- Github user @hklages discovered that the album uri sometimes doesn't work because of encodings
       -- See https://github.com/svrooij/node-sonos-ts/issues/93 if you found and album art uri that doesn't work
       local art = uri:gsub('&amp;', '&'); -- :gsub(/%25/g, '%'):gsub(/%3a/gi, ':')
-      track.art = art:match('^http') and art or 'http://%(host)s:%(port)s%(art)s' % { host = host, port = port, art = art }
+      track.art = art:match('^http') and art or
+          'http://%(host)s:%(port)s%(art)s' % { host = host, port = port, art = art }
     end
 
     if (didl_item.res) then
       track.duration = didl_item.res._attr.duration
       track.uri = didl_item.res[1]
+      track.service = M.guess_service(track)
+      track.type = M.guess_type(track)
       track.protocol_info = didl_item.res._attr.protocolInfo
     end
 
@@ -159,14 +242,16 @@ function M.track_metadata(track, includeResource, cdudn)
   metadata = metadata ..
       '<item id="%(itemId)s" restricted="true"%(parent_attr)s>' % { itemId = itemId, parent_attr = parent_attr }
   if (includeResource) then metadata = metadata ..
-      '<res protocolInfo="%(proto)s" duration="%(duration)s">%(uri)s</res>' %
-      { proto = protocolInfo, duration = track.duration, uri = track.uri } end
+        '<res protocolInfo="%(proto)s" duration="%(duration)s">%(uri)s</res>' %
+        { proto = protocolInfo, duration = track.duration, uri = track.uri }
+  end
   if (track.art) then metadata = metadata .. '<upnp:albumArtURI>%(art)s</upnp:albumArtURI>' % { art = track.art } end
   if (track.title) then metadata = metadata .. '<dc:title>%(title)s</dc:title>' % { title = track.title } end
   if (track.artist) then metadata = metadata .. '<dc:creator>%(artist)s</dc:creator>' % { artist = track.artist } end
   if (track.album) then metadata = metadata .. '<upnp:album>%(album)s</upnp:album>' % { album = track.album } end
   if (track.upnp_class) then metadata = metadata ..
-      '<upnp:class>%(upnp_class)s</upnp:class>' % { upnp_class = track.upnp_class } end
+        '<upnp:class>%(upnp_class)s</upnp:class>' % { upnp_class = track.upnp_class }
+  end
   metadata = metadata ..
       '<desc id="cdudn" nameSpace="urn:schemas-rinconnetworks-com:metadata-1-0/">%(localCdudn)s</desc>' %
       { localCdudn = localCdudn }
@@ -306,13 +391,41 @@ local function appleMetadata(kind,
   return nil
 end
 
+function M.guess_service(track)
+  local service_id = track.uri and track.uri:match('sid=(%d+)') or nil
+  service_id = service_id or track.art and (track.art:match('sid%%3d(%d+)') or track.art:match('sid=(%d+)'))
+  service_id = service_id or (track.uri and track.uri:match('x%-file%-cifs') or (track.art and track.art:match('x%-file%-cifs'))) and '999'
+  if not service_id and track.uri then
+    for id, service in pairs(music_services) do
+      local name = service:gsub(' Music',''):gsub('[\'%s%-%&]+',''):lower()
+      if track.uri:match(name) then
+        service_id = id
+        break
+      end
+    end
+  end
+  return service_id and music_services[service_id] or nil
+end
+
+function M.guess_type(track)
+  local types = {
+    ['object.item.audioItem.musicTrack'] = 'Track',
+    ['object.container.album.musicAlbum'] = 'Album',
+    ['object.container.playlistContainer'] = 'Playlist',
+    ['object.item.audioItem.audioBroadcast'] = 'Radio',
+    ['object.container.albumList'] = 'Playlist'
+  }
+  return track.upnp_class and types[track.upnp_class:gsub('%.#.*','')] or (track.uri and track.uri:match('radio') and 'Radio') or nil
+end
+
 function M.guess_track(trackUri, spotifyRegion)
   if not spotifyRegion then spotifyRegion = '2311' end
   log.debug('Guessing metadata for ' .. trackUri)
   local title = trackUri:gsub('%.%w+$', ''):match('.*/(.*)$') or ''
   local track = {
   }
-  if (trackUri:starts_with('x-file-cifs')) then
+  track.service = M.guess_service({uri = trackUri})
+  if (str_starts_with(trackUri, 'x-file-cifs')) then
     track.id = trackUri:gsub('x-file-cifs', 'S'):gsub('%s', '%20')
     track.title = title:gsub('%20', ' ')
     track.parentid = 'A:TRACKS'
@@ -321,7 +434,7 @@ function M.guess_track(trackUri, spotifyRegion)
     track.cdudn = 'RINCON_AssociatedZPUDN'
     return track
   end
-  if (trackUri:starts_with('file:///jffs/settings/savedqueues.rsq#') or trackUri:starts_with('sonos:playlist:')) then
+  if (str_starts_with(trackUri, 'file:///jffs/settings/savedqueues.rsq#') or str_starts_with(trackUri, 'sonos:playlist:')) then
     local queueId = trackUri.match("%d+")
     if (queueId) then
       track.uri = 'file:///jffs/settings/savedqueues.rsq#%(queueId)s' % { queueId = queueId }
@@ -331,7 +444,7 @@ function M.guess_track(trackUri, spotifyRegion)
       return track
     end
   end
-  if (trackUri:starts_with('x-rincon-playlist')) then
+  if (str_starts_with(trackUri,'x-rincon-playlist')) then
     local parentID = trackUri:match('.*#(.*)%/.*')
     assert(parentID)
     track.id = '%(parentID)s/%(title)s' % { parentID = parentID, title = title:gsub("%s", '%20') }
@@ -342,21 +455,21 @@ function M.guess_track(trackUri, spotifyRegion)
     return track
   end
 
-  if (trackUri:starts_with('x-sonosapi-stream:')) then
+  if (str_starts_with(trackUri,'x-sonosapi-stream:')) then
     track.upnp_class = 'object.item.audioItem.audioBroadcast'
     track.title = 'Some radio station'
     track.id = '10092020_xxx_xxxx' -- Add station ID from url (regex?)
     return track
   end
 
-  if (trackUri:starts_with('x-rincon-cpcontainer:1006206ccatalog')) then -- Amazon prime container
+  if (str_starts_with(trackUri,'x-rincon-cpcontainer:1006206ccatalog')) then -- Amazon prime container
     track.uri = trackUri
     track.id = trackUri:gsub('x-rincon-cpcontainer:', '')
     track.upnp_class = 'object.container.playlistContainer'
     return track
   end
 
-  if (trackUri:starts_with('x-rincon-cpcontainer:100d206cuser-fav')) then -- Sound Cloud likes
+  if (str_starts_with(trackUri,'x-rincon-cpcontainer:100d206cuser-fav')) then -- Sound Cloud likes
     track.uri = trackUri
     track.id = trackUri:gsub('x-rincon-cpcontainer:', '')
     track.upnp_class = 'object.container.albumList'
@@ -364,7 +477,7 @@ function M.guess_track(trackUri, spotifyRegion)
     return track
   end
 
-  if (trackUri:starts_with('x-rincon-cpcontainer:1006206cplaylist')) then -- Sound Cloud playlists
+  if (str_starts_with(trackUri,'x-rincon-cpcontainer:1006206cplaylist')) then -- Sound Cloud playlists
     track.uri = trackUri
     track.id = trackUri:gsub('x-rincon-cpcontainer:', '')
     track.upnp_class = 'object.container.playlistContainer'
@@ -372,7 +485,7 @@ function M.guess_track(trackUri, spotifyRegion)
     return track
   end
 
-  if (trackUri:starts_with('x-rincon-cpcontainer:1004006calbum-')) then -- Deezer Album
+  if (str_starts_with(trackUri,'x-rincon-cpcontainer:1004006calbum-')) then -- Deezer Album
     local numbers = trackUri:match("%d+")
     if (numbers and numbers:len() >= 2) then
       return deezerMetadata('album', numbers)
@@ -396,28 +509,28 @@ function M.guess_track(trackUri, spotifyRegion)
     return appleMetadata(kind, id)
   end
 
-  if (trackUri:starts_with('x-rincon-cpcontainer:10fe206ctracks-artist-')) then -- Deezer Artists Top Tracks
-    local numbers = trackUri:matches('%d+')
+  if (str_starts_with(trackUri,'x-rincon-cpcontainer:10fe206ctracks-artist-')) then -- Deezer Artists Top Tracks
+    local numbers = str_matches(trackUri, '%d+')
     if (numbers and #numbers >= 3) then
       return deezerMetadata('artistTopTracks', numbers[3])
     end
   end
 
-  if (trackUri:starts_with('x-rincon-cpcontainer:1006006cplaylist_spotify%3aplaylist-')) then -- Deezer Playlist
-    local numbers = trackUri:matches('%d+')
+  if (str_starts_with(trackUri,'x-rincon-cpcontainer:1006006cplaylist_spotify%3aplaylist-')) then -- Deezer Playlist
+    local numbers = str_matches(trackUri, '%d+')
     if (numbers and #numbers >= 3) then
       return deezerMetadata('playlist', numbers[3])
     end
   end
 
-  if (trackUri:starts_with('x-sonos-http:tr%3a') and trackUri:match('sid=2')) then -- Deezer Track
+  if (str_starts_with(trackUri,'x-sonos-http:tr%3a') and trackUri:match('sid=2')) then -- Deezer Track
     local numbers = trackUri:match('%d+')
     if (numbers) then
       return deezerMetadata('track', numbers)
     end
   end
 
-  local parts = trackUri:split(':')
+  local parts = str_split(trackUri, ':')
   if ((#parts == 3 or #parts == 5) and parts[1] == 'spotify') then
     return spotifyMetadata(trackUri, parts[2], spotifyRegion)
   end
@@ -430,7 +543,7 @@ function M.guess_track(trackUri, spotifyRegion)
     return appleMetadata(parts[2], parts[3])
   end
 
-  if (#parts == 2 and parts[1] == 'radio' and parts[2]:starts_with('s')) then
+  if (#parts == 2 and parts[1] == 'radio' and str_starts_with(parts[2],'s')) then
     local stationId = parts[2]
     track.upnp_class = 'object.item.audioItem.audioBroadcast'
     track.title = 'Some radio station'

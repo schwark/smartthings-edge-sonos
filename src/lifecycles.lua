@@ -4,6 +4,10 @@ local discovery = require('discovery')
 
 local lifecycle_handler = {}
 
+function lifecycle_handler.infoChanged(driver, device)
+    return commands.handle_faves_refresh(driver,device)
+end
+
 function lifecycle_handler.init(driver, device)
   -------------------
   -- Set up scheduled
@@ -32,7 +36,7 @@ function lifecycle_handler.added(driver, device)
   -- request to share server's ip
   -- and port to the device os it
   -- can communicate back.
-    --commands.handle_added(driver, device)
+  commands.handle_added(driver, device)
 end
 
 function lifecycle_handler.removed(_, device)

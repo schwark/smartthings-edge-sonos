@@ -1,35 +1,21 @@
 local log = require "log"
 local config = require("config")
-local Sonos = require("sonos")
+local Sonos = require("sonos.soap")
 local utils = require("st.utils")
-local socket = require("socket")
 local discovery = {}
 
-function discovery.get_model(type)
-  return config.MODEL..' '..utils.pascal_case(type)
-end
-
-function discovery.get_network_id(type, id)
-  return discovery.get_model(type)..' '..id
-end
-
-function discovery.extract_id(network_id)
-  return network_id:match('[%s_](%d+)$')
-end
-
 local function create_device(driver, device)
-  log.info('===== Creating device for '..device.type..' '..device.name..'...')
+  log.info('===== Creating device for '..device.name..'...')
 
-  local model = discovery.get_model(device.type)
-  local network_id = discovery.get_network_id(device.type, device.id)
+  local network_id = device.id
   -- device metadata table
   local metadata = {
     type = config.DEVICE_TYPE,
     device_network_id = network_id,
     label = device.name,
-    profile = config[device.type:upper()..'_PROFILE'],
+    profile = config.SPEAKER_PROFILE,
     manufacturer = config.MANUFACTURER,
-    model = model,
+    model = device.model or 'Speaker Group',
     vendor_provided_label = network_id
   }
   log.info("creating device with metadata "..utils.stringify_table(metadata))
@@ -38,12 +24,14 @@ end
 
 function discovery.start(driver, opts, cons)
   local sonos = Sonos()
-  local speakers = sonos:discover()
-  if(speakers) then
-    for i, each in ipairs(speakers) do
-        log.info(each.ip.." : "..(each.meta.roomName or "nil"))
+  sonos:update(driver.player_cache)
+  if(sonos.players) then
+    for i, each in ipairs(sonos.players) do
+        log.info('Found '..each.id..' at '..each.ip.." named "..(each.name or "nil"))
+        if(each.name and each.name:match('Master Bedroom')) then
+          create_device(driver, each)
+        end
     end
-    sonos:cmd(speakers[1].ip, "Stop")
   else
       log.error('===== No Sonos speakers found')
   end
