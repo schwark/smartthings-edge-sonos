@@ -1,5 +1,6 @@
 local commands = require('commands')
 local config = require('config')
+local capabilities = require('st.capabilities')
 local discovery = require('discovery')
 
 local lifecycle_handler = {}
@@ -27,6 +28,10 @@ function lifecycle_handler.init(driver, device)
   end
 
   commands.handle_faves_refresh(driver, device)
+
+  local level = device:get_latest_state('main', 'switchLevel', 'level') or 0
+  device:emit_event(capabilities.switchLevel.level(level))
+
   --[[  
   device.thread:call_on_schedule(
     config.PLAYER_UPDATE_SCHEDULE_PERIOD,

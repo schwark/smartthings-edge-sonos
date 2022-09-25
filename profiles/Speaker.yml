@@ -2,6 +2,8 @@ name: Sonos.Speaker.LAN.v1
 components:
 - id: main
   capabilities:
+  - id: switch
+    version: 1
   - id: audioMute
     version: 1
   - id: audioTrackData
@@ -17,8 +19,6 @@ components:
   - id: audioNotification
     version: 1
   - id: audioVolume
-    version: 1
-  - id: switch
     version: 1
   - id: switchLevel
     version: 1

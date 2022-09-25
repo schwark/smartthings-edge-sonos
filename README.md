@@ -22,3 +22,5 @@ This is a Edge driver for LAN based Sonos Control. This uses the SOAP API as it 
 4. If you go to the Settings of the speaker (top right three dots / Settings) you can add the **names** of the Sonos favorites or Sonos playlists from your Sonos app.
 
 5. There is also a dimmer on each speaker, that you can set to any value (between 0 - 100) - this is used to pick WHICH of the names in the settings you want to play when you turn the switch on. Depending on where the dimmer is, it will pick that name from the settings list to play (e.g., if there are only two names in the list in Settings, anything less than 50% will play the first, and anything over 50% will play the second, and so on) - again this is to enable track control using just dimmers and switches which are robustly supported in Routines, etc. Eventually when media playing is more robustly supported in Routines, this will be a hack that is no longer necessary.
+
+Note: Dimmer value of 0% has a special meaning, which is to not play any of the favorites in the settings, but simply hit play on existing queue

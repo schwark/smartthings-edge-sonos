@@ -173,18 +173,35 @@ end
 function command_handlers.get_current_fave(driver, device)
     local choices = device:get_field('faves')
     if not choices or #choices == 0 then return nil end
-    log.error(utils.stringify_table(choices))
-    local level = device:get_field('level') or 0
-    local num_item = math.floor(#choices * level / 100 + 0.5)
-    log.error('current fave is ' .. choices[num_item])
+    log.info(utils.stringify_table(choices))
+    local level = device:get_latest_state('main', 'switchLevel', 'level') or 0
+    if 0 == level then return nil end
+    local num_item = math.floor((#choices - 1) * level / 100 + 0.5) + 1
+    log.info('current fave is ' .. choices[num_item])
     return choices[num_item]
 end
 
 function command_handlers.handle_set_track(driver, device, command)
     log.info("in set track")
     local level = tonumber(command.args.level or '50')
-    device:set_field('level', level)
     device:emit_event(capabilities.switchLevel.level(level))
+end
+
+function command_handlers.handle_mute_command(driver, device, command)
+    log.info("in handle mute for command " .. command.command)
+    local sonos = command_handlers.get_sonos(driver, device)
+    if sonos then
+        local args = {
+            setMute = command.args.state,
+            mute = 'muted',
+            unmute = 'unmuted',
+        }
+        local arg = args[command.command]
+        if arg then
+            sonos:mute_cmd(device.device_network_id, arg == 'muted')
+            device:emit_event(capabilities.audioMute.mute[arg]())
+        end
+    end
 end
 
 function command_handlers.handle_volume_command(driver, device, command)
@@ -226,8 +243,6 @@ function command_handlers.handle_refresh(driver, device)
             local playback_states = { PLAYING = 'playing', TRANSITIONING = 'playing', PAUSED_PLAYBACK = 'paused',
                 STOPPED = 'stopped', NO_MEDIA_PRESENT = 'stopped' }
             update_state(device, 'mediaPlayback', 'playbackStatus', playback_states[play], true)
-            local level = device:get_field('level') or 0
-            update_state(device, 'switchLevel', 'level', level)
             local duration = state.playing and state.playing.duration or 0
             update_state(device, 'audioTrackData', 'totalTime', duration)
             local position = state.playing and state.playing.position or 0

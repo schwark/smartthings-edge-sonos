@@ -329,8 +329,9 @@ local function get_param_xml(cmd, params)
         local parameters = utils.deep_copy(cmd.params)
         if params then
             for key, value in pairs(parameters) do
-                if params[key] then
-                    parameters[key] = params[key]
+                if params[key] ~= nil then
+                    local param = (type(params[key]) == 'boolean' and (params[key] and 1 or 0)) or params[key]
+                    parameters[key] = param
                 end
             end
         end
@@ -560,7 +561,7 @@ function M:find_media_by_field(pname, field)
     local plist = nil
     pname = clean_name(pname)
     for _, list in ipairs({self.playlists, self.favorites}) do
-        log.debug("searching "..utils.stringify_table(list))
+        --log.debug("searching "..utils.stringify_table(list))
         for i, item in ipairs(list) do
             log.debug("searching "..item.title.." for "..pname)
             if clean_name(item[field]):match(pname) then

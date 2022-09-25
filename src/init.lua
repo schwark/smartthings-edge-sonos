@@ -57,9 +57,9 @@ local driver = Driver("Sonos LAN", {
     },    
     capability_handlers = {
       [capabilities.audioMute.ID] = {
-        [capabilities.audioMute.commands.setMute.NAME] = commands.handle_volume_command,
-        [capabilities.audioMute.commands.mute.NAME] = commands.handle_volume_command,
-        [capabilities.audioMute.commands.unmute.NAME] = commands.handle_volume_command,
+        [capabilities.audioMute.commands.setMute.NAME] = commands.handle_mute_command,
+        [capabilities.audioMute.commands.mute.NAME] = commands.handle_mute_command,
+        [capabilities.audioMute.commands.unmute.NAME] = commands.handle_mute_command,
       },
       [capabilities.audioVolume.ID] = {
         [capabilities.audioVolume.commands.setVolume.NAME] = commands.handle_volume_command,
