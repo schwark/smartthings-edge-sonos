@@ -1,5 +1,6 @@
 local socket = require('socket')
 local cosock = require "cosock"
+local socket = cosock.socket
 local http = cosock.asyncify "socket.http"
 --local http = require('socket.http')
 local utils = require("st.utils")
@@ -398,9 +399,9 @@ function M:cmd(player, command, params)
             local xml_parser = xml2lua.parser(xmlres)
             xml_parser:parse(table.concat(res))
             local err = xmlres.root['s:Envelope']['s:Body']['s:Fault']['detail']['UPnPError']['errorCode']
-            log.error(command.." error code "..(err or "nil").." "..(code and errors[err] or "nil"))
+            log.error(player.name..' : '..command.." error code "..(err or "nil").." "..(code and errors[err] or "nil"))
         else 
-            log.error(command..' error with code '..tostring(code)..', status '..tostring(status)..' and content '..table.concat(res))
+            log.error(player.name..' : '..command..' error with code '..tostring(code)..', status '..tostring(status)..' and content '..table.concat(res))
         end
     end
 
