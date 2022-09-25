@@ -269,10 +269,11 @@ function M:find_players(cache, force)
             res = parse_ssdp(res)
             if(res and res.st and config.URN == res.st) then
                 log.info('got a SSDP response from '..ip)
-                local id = res.usn:gsub('::urn.+',''):gsub('uuid:','')
-                local name = res['groupinfo.smartspeaker.audio']:match('gname="([^"]+)')
+                log.debug(utils.stringify_table(res))
+                local id = res.usn and res.usn:gsub('::urn.+',''):gsub('uuid:','') or nil
+                local name = res['groupinfo.smartspeaker.audio'] and res['groupinfo.smartspeaker.audio']:match('gname="([^"]+)') or nil
                 local household = res['household.smartspeaker.audio']
-                if name then
+                if name and id then
                     log.info(id..': found sonos player at '..ip..' named '..name)
                     table.insert(result, {ip = ip, id = id, name = name, household = household})
                 else

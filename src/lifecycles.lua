@@ -23,7 +23,7 @@ function lifecycle_handler.init(driver, device)
     end,
     'Refresh schedule')
   
-    if driver:setup_timer() then
+  if driver:setup_timer() then
     commands.handle_player_refresh(driver)
   end
 
