@@ -429,18 +429,28 @@ function M:get_player(name)
     return nil
 end
 
+local function fix_xml_problems(didl)
+    --[[
+    if didl:match('<DIDL%-Lite xmlns%:dc%=%&quot%;') then
+        didl = didl:gsub('&quot;','"')
+    end
+    --]]
+    if didl:match('&gt;<') then -- fix a common problem with the return xml
+        didl = didl:gsub('&gt;<','><')
+    end
+    return didl
+end
+
 function M:browse(term)
     local result = nil
     local i = 0
-    local player = assert(self:any_player())
     repeat
+        local player = assert(self:any_player())
         local didl
         local status, err = pcall( function () 
             didl = self:cmd(player.id,'Browse', {ObjectID = term})
             if not didl or not didl['Result'] then return nil else didl = didl['Result'] end
-            if didl:match('&gt;<') then -- fix a common problem with the return xml
-                didl = didl:gsub('&gt;<','><')
-            end
+            didl = fix_xml_problems(didl)
             result = metadata.parse_didl(didl, player.ip, config.SONOS_HTTP_PORT)
             --log.debug(result and utils.stringify_table(result) or "nil")
         end)
