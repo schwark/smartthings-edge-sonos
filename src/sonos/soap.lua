@@ -556,7 +556,7 @@ end
 
 function M:set_media(player, media)
     if metadata.is_radio(media.uri) then
-        return self:set_uri(media.uri, media.metadata)
+        return self:set_uri(player, media.uri, media.metadata)
     end
     local p = assert(self:get_player(player))
     assert(self:add_to_queue(player, media.uri, media.metadata, true))
