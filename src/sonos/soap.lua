@@ -156,6 +156,7 @@ local muted_calls = {
     GetMute = true,
     GetPositionInfo = true,
     GetTransportInfo = true,
+    GetTransportSettings = true,
     GetVolume = true,
 }
 
