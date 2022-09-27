@@ -462,7 +462,7 @@ function M:browse(term)
         end)
         i = i + 1
         if not status then
-            log.info('browse failed due to '..tostring(err)..' : retrying ..')
+            log.warn('browse failed due to '..tostring(err)..' : retrying ..')
             log.debug(didl)
             socket.sleep(1)
         end
