@@ -677,7 +677,7 @@ function M:set_play_mode(player, shuffle, rpt, all)
         ftt = 'REPEAT_ALL',
     }
     local mode = modes[lookup] or modes.ff
-    return self:cmd('SetPlayMode', {NewPlayMode = mode}) and true or false
+    return self:cmd(player, 'SetPlayMode', {NewPlayMode = mode}) and true or false
 end
 
 function M:get_state(player)
