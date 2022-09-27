@@ -178,10 +178,23 @@ function M.duration_in_seconds(str)
   return seconds and tonumber(hours) * 60 * 60 + tonumber(minutes) * 60 + tonumber(seconds)
 end
 
+local function fix_xml_problems(didl)
+  if didl:match('<DIDL%-Lite xmlns%:dc%=&quot;') then
+      log.warn("messed up xml - fixing &quot;")
+      didl = didl:gsub('&quot;','"')
+  end
+  if didl:match('<[^>]+&gt;') then
+      log.warn("messed up xml - fixing tag&gt;")
+      didl = didl:gsub('<([^>]+)&gt;','<%1>')
+  end
+  return didl
+end
+
 function M.parse_didl(didl, host, port)
   if (type(didl) == 'table' or not didl or not didl:match('^<DIDL')) then return nil end
   local result = nil
 
+  didl = fix_xml_problems(didl)
   local result_handler = xml_handler:new()
   local result_parser = xml2lua.parser(result_handler)
   result_parser:parse(didl)

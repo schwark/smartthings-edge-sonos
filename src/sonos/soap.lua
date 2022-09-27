@@ -433,18 +433,6 @@ function M:get_player(name)
     return nil
 end
 
-local function fix_xml_problems(didl)
-    if didl:match('<DIDL%-Lite xmlns%:dc%=%&quot%;') then
-        log.warn("messed up xml - fixing &quot;")
-        didl = didl:gsub('&quot;','"')
-    end
-    if didl:match('<[^>]+&gt;') then
-        log.warn("messed up xml - fixing tag&gt;")
-        didl = didl:gsub('<([^>]+)&gt;','<%1>')
-    end
-    return didl
-end
-
 function M:browse(term)
     local result = nil
     local i = 0
@@ -454,7 +442,6 @@ function M:browse(term)
         local status, err = pcall( function () 
             didl = self:cmd(player.id,'Browse', {ObjectID = term})
             if not didl or not didl['Result'] then return nil else didl = didl['Result'] end
-            didl = fix_xml_problems(didl)
             result = metadata.parse_didl(didl, player.ip, config.SONOS_HTTP_PORT)
             --log.debug(result and utils.stringify_table(result) or "nil")
         end)
