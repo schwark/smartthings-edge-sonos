@@ -434,11 +434,10 @@ function M:get_player(name)
 end
 
 local function fix_xml_problems(didl)
-    --[[
     if didl:match('<DIDL%-Lite xmlns%:dc%=%&quot%;') then
+        didl = didl:gsub('&quot;&gt;','">')
         didl = didl:gsub('&quot;','"')
     end
-    --]]
     if didl:match('&gt;<') then -- fix a common problem with the return xml
         didl = didl:gsub('&gt;<','><')
     end

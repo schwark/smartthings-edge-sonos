@@ -15,7 +15,7 @@ config.URN='urn:smartspeaker-audio:service:SpeakerGroup:1'
 -- SSDP Config
 config.MC_ADDRESS='239.255.255.250'
 config.MC_PORT=1900
-config.MC_TIMEOUT=10
+config.MC_TIMEOUT=2
 config.SONOS_HTTP_PORT = '1400'
 config.MSEARCH=table.concat({
   'M-SEARCH * HTTP/1.1',
