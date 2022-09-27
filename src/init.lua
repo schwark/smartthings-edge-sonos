@@ -74,14 +74,14 @@ local driver = Driver("Sonos LAN", {
         [capabilities.audioNotification.commands.playTrack.NAME] = commands.handle_track_command,
         [capabilities.audioNotification.commands.playTrackAndRestore.NAME] = commands.handle_track_command,
         [capabilities.audioNotification.commands.playTrackAndResume.NAME] = commands.handle_track_command,
-      },
+      }, --[[
       [capabilities.switch.ID] = {
         [capabilities.switch.commands.on.NAME] = commands.handle_track_command,
         [capabilities.switch.commands.off.NAME] = commands.handle_track_command,
       },
       [capabilities.switchLevel.ID] = {
         [capabilities.switchLevel.commands.setLevel.NAME] = commands.handle_set_track,
-      },
+      },]]
       [capabilities.mediaPlayback.ID] = {
         [capabilities.mediaPlayback.commands.play.NAME] = commands.handle_track_command,
         [capabilities.mediaPlayback.commands.pause.NAME] = commands.handle_track_command,
@@ -89,6 +89,12 @@ local driver = Driver("Sonos LAN", {
       },
       [capabilities.mediaPresets.ID] = {
         [capabilities.mediaPresets.commands.playPreset.NAME] = commands.handle_track_command,
+      },
+      [capabilities.mediaPlaybackRepeat.ID] = {
+        [capabilities.mediaPlaybackRepeat.commands.setPlaybackRepeatMode.NAME] = commands.handle_play_mode,
+      },
+      [capabilities.mediaPlaybackShuffle.ID] = {
+        [capabilities.mediaPlaybackShuffle.commands.setPlaybackShuffle.NAME] = commands.handle_play_mode,
       },
       [capabilities.mediaTrackControl.ID] = {
         [capabilities.mediaTrackControl.commands.nextTrack.NAME] = commands.handle_track_nav,

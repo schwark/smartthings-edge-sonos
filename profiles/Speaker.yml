@@ -2,15 +2,13 @@ name: Sonos.Speaker.LAN.v1
 components:
 - id: main
   capabilities:
-  - id: switch
+  - id: mediaPlayback
     version: 1
   - id: audioMute
     version: 1
   - id: audioTrackData
     version: 1
   - id: audioStream
-    version: 1
-  - id: mediaPlayback
     version: 1
   - id: mediaPresets
     version: 1
@@ -20,50 +18,15 @@ components:
     version: 1
   - id: audioVolume
     version: 1
-  - id: switchLevel
+  - id: mediaPlaybackShuffle
     version: 1
+  - id: mediaPlaybackRepeat
+    version: 1
+#  - id: switch
+#    version: 1
+#  - id: switchLevel
+#    version: 1
   - id: refresh
     version: 1
   categories:
   - name: NetworkAudio
-preferences:
-  - title: "Favorite/Playlist #1"
-    name: song1
-    description: "Name of Favorite/Playlist #1"
-    required: false
-    preferenceType: string
-    definition:
-      stringType: text
-      default: ""
-  - title: "Favorite/Playlist #2"
-    name: song2
-    description: "Name of Favorite/Playlist #2"
-    required: false
-    preferenceType: string
-    definition:
-      stringType: text
-      default: ""
-  - title: "Favorite/Playlist #3"
-    name: song3
-    description: "Name of Favorite/Playlist #3"
-    required: false
-    preferenceType: string
-    definition:
-      stringType: text
-      default: ""
-  - title: "Favorite/Playlist #4"
-    name: song4
-    description: "Name of Favorite/Playlist #4"
-    required: false
-    preferenceType: string
-    definition:
-      stringType: text
-      default: ""
-  - title: "Favorite/Playlist #5"
-    name: song5
-    description: "Name of Favorite/Playlist #5"
-    required: false
-    preferenceType: string
-    definition:
-      stringType: text
-      default: ""

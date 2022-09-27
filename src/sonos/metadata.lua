@@ -120,10 +120,37 @@ local function str_trim(s)
   return s
 end
 
-
 local function str_starts_with(s, prefix)
   return s:match('^' .. prefix)
 end
+
+local char_to_hex = function(c)
+  return string.format("%%%02X", string.byte(c))
+end
+
+local function urlencode(url)
+  if url == nil then
+    return
+  end
+  url = url:gsub("\n", "\r\n")
+  url = url:gsub("([^%w ])", char_to_hex)
+  url = url:gsub(" ", "+")
+  return url
+end
+
+local hex_to_char = function(x)
+  return string.char(tonumber(x, 16))
+end
+
+local urldecode = function(url)
+  if url == nil then
+    return
+  end
+  url = url:gsub("+", " ")
+  url = url:gsub("%%(%x%x)", hex_to_char)
+  return url
+end
+
 
 
 local function get_upnp_class(parentid)
@@ -251,6 +278,9 @@ function M.track_metadata(track, includeResource, cdudn)
   if (track.upnp_class) then metadata = metadata ..
         '<upnp:class>%(upnp_class)s</upnp:class>' % { upnp_class = track.upnp_class }
   end
+  if track.metadata then
+    metadata = metadata .. '<r:resMD>'..xmlutil.xml_encode(track.metadata)..'</r:resMD>'
+  end
   metadata = metadata ..
       '<desc id="cdudn" nameSpace="urn:schemas-rinconnetworks-com:metadata-1-0/">%(localCdudn)s</desc>' %
       { localCdudn = localCdudn }
@@ -258,9 +288,9 @@ function M.track_metadata(track, includeResource, cdudn)
   return metadata
 end
 
-function M.GuessMetaDataAndTrackUri(trackUri, spotifyRegion)
-  if not spotifyRegion then spotifyRegion = '2311' end
-  local metadata = M.GuessTrack(trackUri, spotifyRegion)
+function M.guess_metadata_and_track(trackUri, spotifyRegion)
+  if not spotifyRegion then spotifyRegion = '3079' end
+  local metadata = M.guess_track(trackUri, spotifyRegion)
 
   return {
     uri = (not metadata or not metadata.uri) and trackUri or xmlutil.xml_decode(metadata.uri),
@@ -268,7 +298,7 @@ function M.GuessMetaDataAndTrackUri(trackUri, spotifyRegion)
   }
 end
 
-local function spotifyMetadata(trackUri, kind, region)
+local function spotify_metadata(trackUri, kind, region)
   local spotifyUri = trackUri:gsub(':', '%3a')
   local track = {
     title = '',
@@ -308,6 +338,7 @@ local function spotifyMetadata(trackUri, kind, region)
     track.uri = 'x-sonos-spotify:%(uri)s?sid=9&amp;flags=8224&amp;sn=7' % { uri = spotifyUri }
     track.id = '00032020%(uri)s' % { uri = spotifyUri }
     track.upnp_class = 'object.item.audioItem.musicTrack'
+    track.art = '/getaa?s=1&u='..urlencode(track.uri)
     return track
   end
   if kind == 'user' then
@@ -322,7 +353,7 @@ local function spotifyMetadata(trackUri, kind, region)
   return nil
 end
 
-local function deezerMetadata(kind, -- 'album' | 'artistTopTracks' | 'playlist' | 'track' | unknown
+local function deezer_metadata(kind, -- 'album' | 'artistTopTracks' | 'playlist' | 'track' | unknown
                               id, region)
   if not region then region = '519' end
   local track = {
@@ -351,12 +382,13 @@ local function deezerMetadata(kind, -- 'album' | 'artistTopTracks' | 'playlist' 
     track.uri = 'x-sonos-http:tr:%(id)s.mp3?sid=2&flags=8224&sn=23' % { kind = kind, id = id }
     track.upnp_class = 'object.item.audioItem.musicTrack.#DEFAULT'
     track.id = '10032020tr%3a%(id)s' % { kind = kind, id = id }
+    track.art = '/getaa?s=1&u='..urlencode(track.uri)
     return track
   end
   return nil
 end
 
-local function appleMetadata(kind,
+local function apple_metadata(kind,
                              -- 'album' | 'libraryalbum' | 'track' | 'librarytrack' | 'song' | 'playlist' | 'libraryplaylist' | unknown
                              id, region)
   if not region then region = '52231' end
@@ -372,7 +404,7 @@ local function appleMetadata(kind,
     track.parentid = '00020000album%3a'
     return track
   end
-  if kind:match('playlist') then
+  if kind:match('playlist') or kind:match('station') then
     track.uri = 'x-rincon-cpcontainer:1006206c%(kind)s:%(id)s?sid=204' % { kind = kind, id = id }
     track.id = '1006206c%(kind)s%3a%(id)s'
     track.upnp_class = 'object.container.playlistContainer'
@@ -384,6 +416,7 @@ local function appleMetadata(kind,
     track.id = '10032020%(trackLabels[kind])s%3a%(id)s'
     track.upnp_class = 'object.item.audioItem.musicTrack'
     track.parentid = '1004206calbum%3a'
+    track.art = '/getaa?s=1&u='..urlencode(track.uri)
     return track
   end
   log.debug('Don\'t support this Apple Music kind ' .. kind)
@@ -418,7 +451,7 @@ function M.guess_type(track)
 end
 
 function M.guess_track(trackUri, spotifyRegion)
-  if not spotifyRegion then spotifyRegion = '2311' end
+  if not spotifyRegion then spotifyRegion = '3079' end -- US: 3079, EU: 2311
   log.debug('Guessing metadata for ' .. trackUri)
   local title = trackUri:gsub('%.%w+$', ''):match('.*/(.*)$') or ''
   local track = {
@@ -487,7 +520,7 @@ function M.guess_track(trackUri, spotifyRegion)
   if (str_starts_with(trackUri,'x-rincon-cpcontainer:1004006calbum-')) then -- Deezer Album
     local numbers = trackUri:match("%d+")
     if (numbers and numbers:len() >= 2) then
-      return deezerMetadata('album', numbers)
+      return deezer_metadata('album', numbers)
     end
   end
 
@@ -495,51 +528,60 @@ function M.guess_track(trackUri, spotifyRegion)
 
   kind, id = trackUri:match('x-rincon-cpcontainer:1004206c([^:]+):([%.%w]+)')
   if (id) then -- Apple Music Album
-    return appleMetadata(kind, id)
+    return apple_metadata(kind, id)
   end
 
   kind, id = trackUri:match('x-rincon-cpcontainer:1006206c([^:]+):([%.%w]+)')
   if (id) then -- Apple Music Playlist
-    return appleMetadata(kind, id)
+    return apple_metadata(kind, id)
   end
 
   kind, id = trackUri:match('x-sonos-http:([^:]+):([%.%w]+)%.mp4%?.*sid=204')
   if (id and 'song' == kind or 'librarytrack' == kind) then -- Apple Music Track
-    return appleMetadata(kind, id)
+    return apple_metadata(kind, id)
   end
 
   if (str_starts_with(trackUri,'x-rincon-cpcontainer:10fe206ctracks-artist-')) then -- Deezer Artists Top Tracks
     local numbers = str_matches(trackUri, '%d+')
     if (numbers and #numbers >= 3) then
-      return deezerMetadata('artistTopTracks', numbers[3])
+      return deezer_metadata('artistTopTracks', numbers[3])
     end
   end
 
   if (str_starts_with(trackUri,'x-rincon-cpcontainer:1006006cplaylist_spotify%3aplaylist-')) then -- Deezer Playlist
     local numbers = str_matches(trackUri, '%d+')
     if (numbers and #numbers >= 3) then
-      return deezerMetadata('playlist', numbers[3])
+      return deezer_metadata('playlist', numbers[3])
     end
   end
 
   if (str_starts_with(trackUri,'x-sonos-http:tr%3a') and trackUri:match('sid=2')) then -- Deezer Track
     local numbers = trackUri:match('%d+')
     if (numbers) then
-      return deezerMetadata('track', numbers)
+      return deezer_metadata('track', numbers)
     end
   end
 
   local parts = str_split(trackUri, ':')
   if ((#parts == 3 or #parts == 5) and parts[1] == 'spotify') then
-    return spotifyMetadata(trackUri, parts[2], spotifyRegion)
+    return spotify_metadata(trackUri, parts[2], spotifyRegion)
   end
 
   if (#parts == 3 and parts[1] == 'deezer') then
-    return deezerMetadata(parts[2], parts[3])
+    return deezer_metadata(parts[2], parts[3])
   end
 
   if (#parts == 3 and parts[1] == 'apple') then
-    return appleMetadata(parts[2], parts[3])
+    return apple_metadata(parts[2], parts[3])
+  end
+
+  if(#parts == 3 and parts[1] == 'hls-radio' or parts[3]:match('m3u8')) then
+    track.upnp_class = 'object.item.audioItem.audioBroadcast'
+    track.title = parts[3]:match('([%w%-]+)%.org') or parts[3]:match('([%w%-]+)%.com') or 'Some radio station'
+    track.id = '10092020_'..(track.title or 'radio') -- Add station ID from url (regex?)
+    track.title = track.title:match('[Rr]adio') and track.title or track.title:gsub("^%l", string.upper)..' Radio'
+    track.uri = trackUri:match('^hls-radio:') and trackUri or 'hls-radio:'..trackUri
+    return track
   end
 
   if (#parts == 2 and parts[1] == 'radio' and str_starts_with(parts[2],'s')) then
@@ -553,6 +595,19 @@ function M.guess_track(trackUri, spotifyRegion)
 
   log.debug('Don\'t support this TrackUri (yet) ' .. trackUri)
   return nil
+end
+
+function M.sonos_track_from_service_uri(uri)
+  if uri:match('%.m3u8$') and not uri:match('^hls-radio') then
+    return 'hls-radio:'..uri
+  end
+  local spotify_type, spotify_track_id = uri:match('spotify.com/([^/]+)/([^/]+)')
+  if spotify_track_id then
+    return 'x-sonos-spotify:spotify:'..spotify_type..':'..spotify_track_id..'?sid=9&flags=8224&sn=3'
+  end
+  local apple_country, apple_type, apple_title, apple_id = uri:match('apple.com/([^/]+)/([^/]+)/([^/]+)/([^/+)')
+
+  return uri
 end
 
 return M

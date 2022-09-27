@@ -1,4 +1,4 @@
-local socket = require('socket')
+--local socket = require('socket')
 local cosock = require "cosock"
 local socket = cosock.socket
 local http = cosock.asyncify "socket.http"
@@ -133,6 +133,7 @@ local types = {
             GetMediaInfo = {params = {InstanceID = 0}},
             GetPositionInfo = {params = {InstanceID = 0}},
             GetTransportInfo = {params = {InstanceID = 0}}, -- STOPPED / PLAYING / PAUSED_PLAYBACK / TRANSITIONING
+            GetTransportSettings = {params = {InstanceID = 0}}, -- NORMAL / REPEAT_ALL / REPEAT_ONE / SHUFFLE_NOREPEAT / SHUFFLE / SHUFFLE_REPEAT_ONE
             SetPlayMode = {params = {InstanceID = 0, NewPlayMode = ""}}, -- NORMAL / REPEAT_ALL / REPEAT_ONE / SHUFFLE_NOREPEAT / SHUFFLE / SHUFFLE_REPEAT_ONE
             Play = {params = {InstanceID = 0, Speed = 1}},
             Pause = {params = {InstanceID = 0}},
@@ -181,6 +182,7 @@ local function constructor(self,o)
     o.players = o.players or nil
     o.favorites = o.favorites or nil
     o.playlists = o.playlists or nil
+    o.last_updated = o.last_updated or nil
     setmetatable(o, M)
     return o
 end
@@ -439,6 +441,9 @@ local function fix_xml_problems(didl)
     if didl:match('&gt;<') then -- fix a common problem with the return xml
         didl = didl:gsub('&gt;<','><')
     end
+    if didl:match('<dc%:title&gt;') then
+        didl = didl:gsub('<dc%:title&gt;','<dc:title>')
+    end
     return didl
 end
 
@@ -459,6 +464,7 @@ function M:browse(term)
         if not status then
             log.info('browse failed due to '..tostring(err)..' : retrying ..')
             log.debug(didl)
+            socket.sleep(1)
         end
     until status or i > 1
     return result
@@ -642,9 +648,36 @@ function M:whats_playing(player)
     return result
 end
 
-function M:get_play_mode(player)
+function M:get_play_state(player)
     local result = self:cmd(player, 'GetTransportInfo')
     return result and result.CurrentTransportState or nil
+end
+
+function M:get_play_mode(player)
+    local result = self:cmd(player, 'GetTransportSettings')
+    local shuffle = false
+    local rpt = false
+    local all = false
+
+    local state = result and result.PlayMode or 'NORMAL'
+    shuffle = state:match('SHUFFLE')
+    rpt = state:match('^REPEAT') or state == 'SHUFFLE'
+    all = state:match('_ALL') or state == 'SHUFFLE'
+    return shuffle, rpt, all
+end
+
+function M:set_play_mode(player, shuffle, rpt, all)
+    local lookup = (shuffle and 't' or 'f') .. (rpt and 't' or 'f') .. rpt and (all and 't' or 'f') or ''
+    local modes = {
+        ff = 'NORMAL',
+        tf = 'SHUFFLE_NOREPEAT',
+        ttf = 'SHUFFLE_REPEAT_ONE',
+        ttt = 'SHUFFLE',
+        ftf = 'REPEAT_ONE',
+        ftt = 'REPEAT_ALL',
+    }
+    local mode = modes[lookup] or modes.ff
+    return self:cmd('SetPlayMode', {NewPlayMode = mode}) and true or false
 end
 
 function M:get_state(player)
@@ -652,7 +685,8 @@ function M:get_state(player)
     result.playing = self:whats_playing(player)
     result.mute = self:get_mute(player)
     result.volume = self:get_volume(player)
-    result.state = self:get_play_mode(player)
+    result.state = self:get_play_state(player)
+    result.shuffle, result.rpt, result.all = self:get_play_mode(player)
     return result
 end
 
@@ -664,6 +698,7 @@ function M:update(cache, force)
     if cache then
         cache.last_updated = updated and os.time() or cache.last_updated
     end
+    self.last_updated = (updated and os.time()) or (cache and cache.last_updated) or self.last_updated
     return updated
 end
 

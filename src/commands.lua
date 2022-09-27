@@ -107,17 +107,35 @@ function command_handlers.handle_faves_refresh(driver, device)
         local item = nil
         local i = 1
         repeat
-            item = device.preferences['song' .. i]
-            log.debug("song" .. i .. " is " .. (item or "nil"))
-            if item and "" ~= item and not tostring(item):match('userdata') then
-                table.insert(list, item)
-                i = i + 1
-            else
-                item = nil
+            item = device.preferences and device.preferences['song' .. i] or nil
+            if item then
+                log.debug("song" .. i .. " is " .. (item or "nil"))
+                if item and not is_empty(item) then
+                    table.insert(list, item)
+                    i = i + 1
+                else
+                    item = nil
+                end
             end
         until not item
         log.info('setting faves to ' .. utils.stringify_table(list))
         device:set_field('faves', list)
+    end
+end
+
+function command_handlers.handle_play_mode(driver, device, command)
+    log.info("in " .. command.command .. " command for " .. device.label)
+    local sonos = command_handlers.get_sonos(driver, device)
+    if sonos then
+        local s = command.args.shuffle or device:get_latest_state('main','mediaPlaybackShuffle','playbackShuffle') or 'disabled'
+        local r = command.args.mode or device:get_latest_state('main','mediaPlaybackRepeat','playbackRepeat') or 'off'
+        local shuffle = s == 'enabled'
+        local rpt = r ~= 'off'
+        local all = r == 'all'
+        if sonos:set_play_mode(device.device_network_id, shuffle, rpt, all) then
+            update_state(device, 'mediaPlaybackShuffle','playbackShuffle', s)
+            update_state(device, 'mediaPlaybackRepeat','playbackRepeatMode', r)
+        end
     end
 end
 
@@ -247,6 +265,8 @@ function command_handlers.handle_refresh(driver, device)
             update_state(device, 'audioTrackData', 'totalTime', duration)
             local position = state.playing and state.playing.position or 0
             update_state(device, 'audioTrackData', 'elapsedTime', position)
+            update_state(device, 'mediaPlaybackShuffle', 'playbackShuffle', state.shuffle and 'enabled' or 'disabled')
+            update_state(device, 'mediaPlaybackRepeat', 'playbackRepeatMode', state.rpt and (state.all and 'all' or 'one') or 'off')
             --log.debug(utils.stringify_table(state))
             local track_nav = {}
             if state.playing then

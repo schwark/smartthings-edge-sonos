@@ -27,12 +27,12 @@ function lifecycle_handler.init(driver, device)
     commands.handle_player_refresh(driver)
   end
 
+  --[[
   commands.handle_faves_refresh(driver, device)
 
   local level = device:get_latest_state('main', 'switchLevel', 'level') or 0
   device:emit_event(capabilities.switchLevel.level(level))
 
-  --[[  
   device.thread:call_on_schedule(
     config.PLAYER_UPDATE_SCHEDULE_PERIOD,
     function ()
