@@ -257,7 +257,7 @@ function command_handlers.handle_refresh(driver, device)
             update_state(device, 'audioStream', 'uri', uri)
             local play = state.state or 'STOPPED'
             local switch_states = { PLAYING = 'on', TRANSITIONING = 'on' }
-            --update_state(device, 'switch', 'switch', switch_states[play] or 'off', true)
+            update_state(device, 'switch', 'switch', switch_states[play] or 'off', true)
             local playback_states = { PLAYING = 'playing', TRANSITIONING = 'playing', PAUSED_PLAYBACK = 'paused',
                 STOPPED = 'stopped', NO_MEDIA_PRESENT = 'stopped' }
             update_state(device, 'mediaPlayback', 'playbackStatus', playback_states[play], true)

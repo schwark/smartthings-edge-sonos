@@ -22,8 +22,8 @@ components:
     version: 1
   - id: mediaPlaybackRepeat
     version: 1
-#  - id: switch
-#    version: 1
+  - id: switch
+    version: 1
 #  - id: switchLevel
 #    version: 1
   - id: refresh
