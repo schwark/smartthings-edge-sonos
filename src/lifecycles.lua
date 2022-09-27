@@ -1,12 +1,10 @@
 local commands = require('commands')
 local config = require('config')
-local capabilities = require('st.capabilities')
-local discovery = require('discovery')
 
 local lifecycle_handler = {}
 
 function lifecycle_handler.infoChanged(driver, device)
-    return commands.handle_faves_refresh(driver,device)
+    --return commands.handle_faves_refresh(driver,device)
 end
 
 function lifecycle_handler.init(driver, device)
