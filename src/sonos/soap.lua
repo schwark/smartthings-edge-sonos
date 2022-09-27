@@ -567,7 +567,7 @@ function M:find_media_by_field(pname, field)
         --log.debug("searching "..utils.stringify_table(list))
         for i, item in ipairs(list) do
             log.debug("searching "..item.title.." for "..pname)
-            if clean_name(item[field]):match(pname) then
+            if clean_name(item[field]) == pname then
                 log.info("found media "..item.title)
                 plist = item
                 break

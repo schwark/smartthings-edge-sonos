@@ -169,6 +169,8 @@ function M.is_radio(uri)
       uri:match('x-sonosapi-radio:') or
       uri:match('pndrradio:') or
       uri:match('x-sonosapi-hls:') or
+      uri:match('hls-radio:') or
+      uri:match('m3u8') or
       uri:match('x-sonosprog-http:');
 end
 
@@ -600,8 +602,8 @@ function M.guess_track(trackUri, spotifyRegion)
   if (#parts == 2 and parts[1] == 'radio' and str_starts_with(parts[2],'s')) then
     local stationId = parts[2]
     track.upnp_class = 'object.item.audioItem.audioBroadcast'
-    track.title = 'Some radio station'
-    track.id = '10092020_xxx_xxxx' -- Add station ID from url (regex?)
+    track.title = 'TuneIn Radio Station'
+    track.id = '10092020_'..stationId -- Add station ID from url (regex?)
     track.uri = 'x-sonosapi-stream:%(stationId)s?sid=254&flags=8224&sn=0' % { stationId = stationId }
     return track
   end
@@ -614,11 +616,20 @@ function M.sonos_track_from_service_uri(uri)
   if uri:match('%.m3u8$') and not uri:match('^hls-radio') then
     return 'hls-radio:'..uri
   end
-  local spotify_type, spotify_track_id = uri:match('spotify.com/([^/]+)/([^/]+)')
-  if spotify_track_id then
+  local spotify_type, spotify_track_id = uri:match('spotify%.com/([^/]+)/([^/]+)')
+  if 'track' == spotify_type and spotify_track_id then
     return 'x-sonos-spotify:spotify:'..spotify_type..':'..spotify_track_id..'?sid=9&flags=8224&sn=3'
   end
-  local apple_country, apple_type, apple_title, apple_id = uri:match('apple.com/([^/]+)/([^/]+)/([^/]+)/([^/+)')
+  if 'album' == spotify_type and spotify_track_id then
+    return 'x-sonos-spotify:spotify:'..spotify_type..':'..spotify_track_id..'?sid=9&flags=8224&sn=3'
+  end
+  if 'show' == spotify_type and spotify_track_id then
+    return 'x-sonos-spotify:spotify:'..spotify_type..':'..spotify_track_id..'?sid=9&flags=8224&sn=3'
+  end
+  if 'station' == spotify_type and spotify_track_id then
+    return 'x-sonos-spotify:spotify:'..spotify_type..':'..spotify_track_id..'?sid=9&flags=8224&sn=3'
+  end
+  local apple_country, apple_type, apple_title, apple_id = uri:match('apple%.com/([^/]+)/([^/]+)/([^/]+)/([^/+)')
 
   return uri
 end
