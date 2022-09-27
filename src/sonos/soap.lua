@@ -435,14 +435,12 @@ end
 
 local function fix_xml_problems(didl)
     if didl:match('<DIDL%-Lite xmlns%:dc%=%&quot%;') then
-        didl = didl:gsub('&quot;&gt;','">')
+        log.warn("messed up xml - fixing &quot;")
         didl = didl:gsub('&quot;','"')
     end
-    if didl:match('&gt;<') then -- fix a common problem with the return xml
-        didl = didl:gsub('&gt;<','><')
-    end
-    if didl:match('<dc%:title&gt;') then
-        didl = didl:gsub('<dc%:title&gt;','<dc:title>')
+    if didl:match('<[^>]+&gt;') then
+        log.warn("messed up xml - fixing tag&gt;")
+        didl = didl:gsub('<([^>]+)&gt;','<%1>')
     end
     return didl
 end
