@@ -87,12 +87,6 @@ local function find_hub_ip(driver)
     return localip
 end
 
-function command_handlers.get_current_subscription(driver, device, type)
-    return driver.subscriptions[device.device_network_id] 
-            and driver.subscriptions[device.device_network_id][type] 
-            and driver.subscriptions[device.device_network_id][type] or nil
-end
-
 function command_handlers.handle_added(driver, device)
     command_handlers.handle_refresh(driver, device)
     device:emit_event(capabilities.switchLevel.level(0))
@@ -102,17 +96,23 @@ end
 function command_handlers.handle_subs(driver, device)
     local sonos = command_handlers.get_sonos(driver, device)
     if sonos then
+        for timer in pairs(device.thread.timers) do
+            device.thread:cancel_timer(timer)
+        end
         local event_subs = {'AVTransport', 'GroupRenderingControl'}
         local callback = 'http://%(host)s:%(port)s/' % {host = find_hub_ip(driver), port = driver.server.port}
         for i, type in ipairs(event_subs) do
             driver.subscriptions[device.device_network_id] = driver.subscriptions[device.device_network_id] or {}
-            local current = command_handlers.get_current_subscription(driver, device, type)
+            local current = driver.subscriptions[device.device_network_id] and driver.subscriptions[device.device_network_id][type]
+            log.info('current subscription is '..(current and tostring(current.sid) or "nil"))
             if not current or (current.timeout and current.timeout - os.time() < config.SUBSCRIPTION_TIME/10) then
                 local sid = sonos:subscribe_events(device.device_network_id, type, callback, current and current.sid or nil)
                 if sid then
+                    log.info('successful subscription for '..(device.label or "nil"))
                     driver.subscriptions[device.device_network_id][type] = {sid = sid, timeout = os.time() + config.SUBSCRIPTION_TIME}
                 else
                     -- fall back on polling
+                    log.info('falling back on polling for '..(device.label or "nil"))
                     device.thread:call_on_schedule(
                         config.STATE_UPDATE_SCHEDULE_PERIOD,
                         function ()
@@ -131,7 +131,7 @@ function command_handlers.handle_unsubs(driver, device)
         local subs = driver.subscriptions[device.device_network_id] or {}
         for type, sub in pairs(subs) do
             sonos:unsubscribe_events(device.device_network_id, type, sub.sid)
-            driver.subscriptions[device.device_network_id].type = nil
+            driver.subscriptions[device.device_network_id][type] = nil
         end
     end
 end

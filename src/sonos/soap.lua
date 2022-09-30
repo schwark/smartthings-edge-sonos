@@ -366,13 +366,17 @@ function M:subscribe_events(player, type, callback, sid)
             headers = headers
         })
         log.debug('SUBSCRIBE with headers '..utils.stringify_table(headers))
+        local verb = sid and 'renewal' or 'subscribe'
         if code and 200 == code then
             log.debug(utils.stringify_table(res_headers))
             sid = res_headers.sid
-            log.info('subscribe successful '.. (sid or "nil"))
+            log.info(verb..' successful '.. (sid or "nil") .. " for "..(player.name or "nil"))
         else
-            log.error('subscribe error with status '..(status or "nil"))
+            log.error(verb..' error with status '..(status or "nil"))
             log.error('code is '..(code or "nil"))
+            if(0 == i) then 
+                log.info('retrying subscription as new subscription for '..(player.name or "nil")) 
+            end
             sid = nil -- if renewal fails try again as new subscription
         end
         i = i + 1

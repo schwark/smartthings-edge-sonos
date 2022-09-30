@@ -272,13 +272,23 @@ end
 
 
 local function fix_xml_problems(didl)
+  local fixing = didl:match('<DIDL%-Lite xmlns%:dc%=&quot;') or didl:match('<[^>]+&gt;')
+  didl = didl:gsub('(<r:resMD>)(.-)(</r:resMD>)', function(x,y,z) return x..xmlutil.xml_encode(xmlutil.xml_decode(y))..z end)
+  --[[
   if didl:match('<DIDL%-Lite xmlns%:dc%=&quot;') then
       log.warn("messed up xml - fixing &quot;")
       didl = didl:gsub('&quot;','"')
+      fixed = true
   end
   if didl:match('<[^>]+&gt;') then
       log.warn("messed up xml - fixing tag&gt;")
       didl = didl:gsub('<([^>]+)&gt;','<%1>')
+      fixed = true
+  end
+  --]]
+  if (fixing) then 
+    log.info('xml is messed up again... fixing...')
+    log.debug("fixed xml is...: "..didl) 
   end
   return didl
 end
