@@ -2,7 +2,7 @@
 local cosock = require "cosock"
 local socket = cosock.socket
 local http = cosock.asyncify "socket.http"
---local http = require('socket.http')
+
 local utils = require("st.utils")
 local ltn12 = require('ltn12')
 -- XML modules
@@ -102,14 +102,18 @@ end
 getmetatable("").__mod = interp
 
 local types = {
-    ['urn:schemas-upnp-org:service:ContentDirectory:1'] = {
+    ContentDirectory = {
+        urn = 'urn:schemas-upnp-org:service:ContentDirectory:1',
         control = '/MediaServer/ContentDirectory/Control',
+        events = '/MediaRenderer/ContentDirectory/Event',
         commands = {
             Browse = {params = {ObjectID = "", BrowseFlag = "BrowseDirectChildren", Filter = "*", StartingIndex = 0, RequestedCount = 100, SortCriteria=""}}
         }
     },
-    ['urn:schemas-upnp-org:service:RenderingControl:1'] = {
+    RenderingControl = {
+        urn = 'urn:schemas-upnp-org:service:RenderingControl:1',
         control = '/MediaRenderer/RenderingControl/Control',
+        events = '/MediaRenderer/RenderingControl/Event',
         commands = {
             GetVolume = {params = {InstanceID = 0, Channel = "Master"}},
             GetMute = {params = {InstanceID = 0, Channel = "Master"}},
@@ -117,15 +121,30 @@ local types = {
             SetMute = {params = {InstanceID = 0, Channel = "Master", DesiredMute = true}},
         }
     },
-    ['urn:schemas-upnp-org:service:ZoneGroupTopology:1'] = {
+    GroupRenderingControl = {
+        urn = 'urn:schemas-upnp-org:service:GroupRenderingControl:1',
+        control = '/MediaRenderer/GroupRenderingControl/Control',
+        events = '/MediaRenderer/GroupRenderingControl/Event',
+        commands = {
+            GetGroupVolume = {params = {InstanceID = 0}},
+            GetGroupMute = {params = {InstanceID = 0}},
+            SetGroupVolume = {params = {InstanceID = 0, DesiredVolume = 50}},
+            SetGroupMute = {params = {InstanceID = 0, DesiredMute = true}},
+        }
+    },
+    ZoneGroupTopology = {
+        urn = 'urn:schemas-upnp-org:service:ZoneGroupTopology:1',
         control = '/ZoneGroupTopology/Control',
+        events = '/ZoneGroupTopology/Event',
         commands = {
             GetZoneGroupState = {},
             GetZoneGroupAttributes = {}
         }
     },
-    ['urn:schemas-upnp-org:service:AVTransport:1'] = {
+    AVTransport = {
+        urn = 'urn:schemas-upnp-org:service:AVTransport:1',
         control = '/MediaRenderer/AVTransport/Control',
+        events = '/MediaRenderer/AVTransport/Event',
         commands = {
             SetAVTransportURI = {params = {InstanceID = 0, CurrentURI = "", CurrentURIMetaData= ""}},
             RemoveAllTracksFromQueue = {params = {InstanceID = 0}},
@@ -143,8 +162,10 @@ local types = {
             Seek = {params = {InstanceID = 0, Unit = "", Target = ""}}, --TRACK_NR / REL_TIME / TIME_DELTA // Position of track in queue (start at 1) or hh:mm:ss for REL_TIME or +/-hh:mm:ss for TIME_DELTA
         }
     },
-    ['urn:schemas-sonos-com:service:Queue:1'] = {
+    Queue = {
+        urn = 'urn:schemas-sonos-com:service:Queue:1',
         control = '/MediaRenderer/Queue/Control',
+        events = '/MediaRenderer/Queue/Event',
         commands = {
 
         }
@@ -158,6 +179,8 @@ local muted_calls = {
     GetTransportInfo = true,
     GetTransportSettings = true,
     GetVolume = true,
+    GetGroupVolume = true,
+    GetGroupMute = true,
 }
 
 local function get_command_meta(command)
@@ -165,7 +188,7 @@ local function get_command_meta(command)
     for type, meta in pairs(types) do
         for cmd, item in pairs(meta.commands) do
             if cmd:lower() == command:lower() then
-                result = {type = type, command = cmd, control = meta.control, params = item.params}
+                result = {type = type, urn = meta.urn, events = meta.events, command = cmd, control = meta.control, params = item.params}
                 break
             end
         end
@@ -197,6 +220,7 @@ function M.get_instance()
     end
     return _instance
 end
+
 
 local function get_config(ip)
     local res = {}
@@ -240,6 +264,7 @@ function M:init_player(ip)
     end
     return nil
 end
+
 
 -- This function enables a UDP
 -- Socket and broadcast a single
@@ -305,11 +330,84 @@ function M:find_players(cache, force)
     return next(result) and result or nil
 end
 
+local function get_device_url(device)
+    return 'http://'..device.ip..':'..config.SONOS_HTTP_PORT
+end
+
+function M:get_types_meta()
+    return types
+end
+
+function M:process_event(player, event)
+    local player = assert(self:get_player(player))
+    return metadata.parse_properties(event, player.ip, config.SONOS_HTTP_PORT)
+end
+
+function M:subscribe_events(player, type, callback, sid)
+    local player = assert(self:get_player(player))
+    local i = 0
+    repeat
+        local host = player.ip..':'..config.SONOS_HTTP_PORT
+        local headers = {
+            Host = host,
+            TIMEOUT = 'Second-'..config.SUBSCRIPTION_TIME,
+        }
+        if sid then
+            headers.SID = sid
+        else
+            headers.CALLBACK = '<'..callback..'>'
+            headers.NT = 'upnp:event'
+        end
+        local url = types[type].events
+        local res = {}
+        local req_result, code, res_headers, status = http.request({
+            url='http://'..host..url,
+            method = 'SUBSCRIBE',
+            headers = headers
+        })
+        log.debug('SUBSCRIBE with headers '..utils.stringify_table(headers))
+        if code and 200 == code then
+            log.debug(utils.stringify_table(res_headers))
+            sid = res_headers.sid
+            log.info('subscribe successful '.. (sid or "nil"))
+        else
+            log.error('subscribe error with status '..(status or "nil"))
+            log.error('code is '..(code or "nil"))
+            sid = nil -- if renewal fails try again as new subscription
+        end
+        i = i + 1
+    until sid or i > 1 -- if renewal fails try again as new subscription
+    return sid
+  end
+
+  function M:unsubscribe_events(player, type, sid)
+    local player = assert(self:get_player(player))
+    local result = nil
+    local host = player.ip..':'..config.SONOS_HTTP_PORT
+    local headers = {
+        Host = host,
+        SID = sid,
+    }
+    local url = types[type].events
+    local req_result, code, headers, status = http.request({
+        url='http://'..host..url,
+        method = 'UNSUBSCRIBE',
+        headers = headers
+      })
+      if code and 200 == code then
+        log.info('unsubscribe successful ')
+    else
+        log.error('unsubscribe error with status '..(status or "nil"))
+        log.error('code is '..(code or "nil"))
+    end
+    return result
+  end
+
 local function get_request_body(command)
     local result = [[<?xml version="1.0" encoding="utf-8"?>
     <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
       <s:Body>
-        <u:%(cmd)s xmlns:u="%(type)s">
+        <u:%(cmd)s xmlns:u="%(urn)s">
         %(paramxml)s
         </u:%(cmd)s>
       </s:Body>
@@ -350,26 +448,27 @@ function M:cmd(player, command, params)
     local ip = assert(player.ip)
 
     local res = {}
-    local url = 'http://'..ip..':'..config.SONOS_HTTP_PORT
+    local url = get_device_url(player)
     local cmd = assert(get_command_meta(command))
 
     url = url..cmd.control
-    local cparams = {cmd = cmd.command, type = cmd.type, paramxml = ""}
+    local cparams = {cmd = cmd.command, type = cmd.type, urn = cmd.urn, paramxml = ""}
     cparams.paramxml = get_param_xml(cmd, params)
     local body = get_request_body(cparams)
     local headers = {
         Host = ip..':1400',
-        soapaction = cmd.type..'#'..cmd.command,
+        soapaction = cmd.urn..'#'..cmd.command,
         ['Content-Type'] = 'text/xml; charset="utf-8"',
         ['Content-Length'] = #body
     }
     if not muted_calls[command] then
         log.debug("executing on "..player.name.." command "..command.." with params "..(params and utils.stringify_table(params) or "none"))
     end
+    --log.debug(url)
     --log.debug(utils.stringify_table(headers))
     --log.debug(body)
 
-    local req_result, code, headers, status = http.request({
+    local req_result, code, res_headers, status = http.request({
       url=url,
       method = 'POST',
       headers = headers,
@@ -416,6 +515,9 @@ function M:any_player()
 end
 
 function M:get_player(name)
+    if name and type(name) == 'table' and name.ip then
+        return name
+    end
     if name and name:match('%d+%.%d+%.%d+%.%d+') then -- is an ip address
         return self:init_player(name)
     end
@@ -478,7 +580,7 @@ function M:playback_cmd(player, cmd)
 end
 
 function M:mute_cmd(player, state)
-    return self:cmd(player, 'SetMute', {DesiredMute = state and true or false}) and true or false
+    return self:cmd(player, 'SetGroupMute', {DesiredMute = state and true or false}) and true or false
 end
 
 function M:play(player)
@@ -502,7 +604,7 @@ function M:next(player)
 end
 
 function M:get_mute(player) 
-    local result = self:cmd(player, 'GetMute')
+    local result = self:cmd(player, 'GetGroupMute')
     return result and result.CurrentMute or nil
 end
 
@@ -515,13 +617,13 @@ function M:unmute(player)
 end
 
 function M:get_volume(player) 
-    local result = self:cmd(player, 'GetVolume')
+    local result = self:cmd(player, 'GetGroupVolume')
     return result and result.CurrentVolume and tonumber(result.CurrentVolume) or nil
 end
 
 function M:set_volume(player, volume) -- number between 0 and 100
     assert(volume and type(volume) == "number" and volume >= 0 and volume <= 100)
-    return self:cmd(player, 'SetVolume', {DesiredVolume = volume}) and true or false
+    return self:cmd(player, 'SetGroupVolume', {DesiredVolume = volume}) and true or false
 end
 
 function M:set_uri(player, uri, mdata)
@@ -614,7 +716,6 @@ function M:whats_playing(player)
             if not result.duration then
                 result.duration = response.TrackDuration
             end
-            result.duration = metadata.duration_in_seconds(result.duration)
             result.metadata = response.TrackMetaData
             result.position = metadata.duration_in_seconds(response.RelTime)
             if result.title:match('preroll') then
@@ -638,16 +739,16 @@ function M:get_play_state(player)
     return result and result.CurrentTransportState or nil
 end
 
-function M:get_play_mode(player)
-    local result = self:cmd(player, 'GetTransportSettings')
+function M:get_play_mode(player, mode)
+    local result = mode or self:cmd(player, 'GetTransportSettings')
     local shuffle = false
     local rpt = false
     local all = false
 
     local state = result and result.PlayMode or 'NORMAL'
-    shuffle = state:match('SHUFFLE')
-    rpt = state:match('^REPEAT') or state == 'SHUFFLE'
-    all = state:match('_ALL') or state == 'SHUFFLE'
+    shuffle = state:match('SHUFFLE') or false
+    rpt = state:match('^REPEAT') or state == 'SHUFFLE' or false
+    all = state:match('_ALL') or state == 'SHUFFLE' or false
     return shuffle, rpt, all
 end
 

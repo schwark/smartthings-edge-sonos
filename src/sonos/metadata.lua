@@ -180,6 +180,97 @@ function M.duration_in_seconds(str)
   return seconds and tonumber(hours) * 60 * 60 + tonumber(minutes) * 60 + tonumber(seconds)
 end
 
+function M.to_int(str)
+  return tonumber(str)
+end
+
+function M.to_bool(str)
+  if '0' == str then return false end
+  return true
+end
+
+local vars = {
+  GroupVolume = 'volume#to_int',
+  GroupMute = 'mute',
+  LastChange = 'event',
+  CurrentPlayMode = 'play_mode',
+  TransportState = 'state',
+  NumberOfTracks = 'playing.num_tracks#to_int',
+  CurrentTrack = 'playing.num#to_int',
+  CurrentTrackMetaData = 'playing.metadata',
+  CurrentTrackURI = 'playing.uri',
+  CurrentTrackDuration = 'playing.duration#duration_in_seconds',
+}
+
+local function fix_event_xml(xml)
+  return xml:gsub('(val=")([^"]-DIDL%-Lite.-/DIDL%-Lite[^"]-)("/>)', function (x, y, z) return x..xmlutil.xml_encode(xmlutil.xml_decode(y))..z end)
+end
+
+local function set_field(result, path, value)
+  if not path or not value then return end
+  local steps = str_split(path, '%.')
+  local where = result
+  for i=1,#steps-1 do
+      where = where[steps[i]]
+  end
+  local field, conv = steps[#steps]:match('([^#]+)#?(.*)')
+  where[field] = conv and '' ~= conv and M[conv](value) or value
+end
+
+function M.parse_event(event, result, host, port)
+  log.debug('before fixing'..event)
+  event = fix_event_xml(event)
+  log.debug('after fixing'..event)
+  local xmlres = xml_handler:new()
+  local xml_parser = xml2lua.parser(xmlres)
+  xml_parser:parse(event)
+  local items = xmlres and xmlres.root and xmlres.root.Event and xmlres.root.Event.InstanceID or nil
+  if items then
+      if not result then result = {} end
+      if not result.playing then result.playing = {} end
+      for key, value in pairs(items) do
+          set_field(result, vars[key], value and value._attr and value._attr.val or nil)
+      end
+  end
+  if result and result.playing and result.playing.metadata then
+      local track = M.parse_didl(result.playing.metadata, host, port)
+      if track and track[1] then
+          for key, value in pairs(track[1]) do
+              if value and '' ~= value then
+                  result.playing[key] = value
+              end
+          end
+      end
+  end
+  result.event = nil
+  log.debug(utils.stringify_table(result))
+  return result
+end
+
+function M.parse_properties(event, host, port)
+  local xmlres = xml_handler:new()
+  local xml_parser = xml2lua.parser(xmlres)
+  xml_parser:parse(event)
+
+  local properties = xmlres and xmlres.root and xmlres.root['e:propertyset']['e:property'] or nil
+  log.info(utils.stringify_table(properties))
+  properties = properties and not properties[1] and {properties} or properties
+  local result = {}
+  for i, property in ipairs(properties) do
+      for var, value in pairs(property) do
+          if vars[var] then
+              set_field(result, vars[var], value)
+          else
+              log.warn(var.." unassigned value "..value)
+          end
+      end
+  end
+  if result.event then result = M.parse_event(result.event, result, host, port) end
+  log.debug(utils.stringify_table(result))
+  return result
+end
+
+
 local function fix_xml_problems(didl)
   if didl:match('<DIDL%-Lite xmlns%:dc%=&quot;') then
       log.warn("messed up xml - fixing &quot;")
@@ -242,7 +333,7 @@ function M.parse_didl(didl, host, port)
     end
 
     if (didl_item.res) then
-      track.duration = didl_item.res._attr and didl_item.res._attr.duration or nil
+      track.duration = M.duration_in_seconds(didl_item.res._attr and didl_item.res._attr.duration or nil)
       track.uri = didl_item.res[1]
       track.service = M.guess_service(track)
       track.type = M.guess_type(track)

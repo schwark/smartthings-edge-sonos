@@ -14,16 +14,20 @@ function lifecycle_handler.init(driver, device)
   -- driver gets
   -- initialized.
   --commands.set_timer(driver, device)
-  device.thread:call_on_schedule(
-    config.STATE_UPDATE_SCHEDULE_PERIOD,
-    function ()
-        return commands.handle_refresh(driver, device)
-    end,
-    'Refresh schedule')
-  
+    
   if driver:setup_timer() then
     commands.handle_player_refresh(driver)
   end
+
+  device.thread:call_with_delay(10, function () commands.handle_init(driver, device) end)
+
+  local default_state = {
+    duration = 0,
+    play_mode = 'NORMAL',
+    volume = 0,
+    mute = 0,
+    state = 'STOPPED'
+  }
 
   --[[
   commands.handle_faves_refresh(driver, device)
@@ -61,6 +65,7 @@ function lifecycle_handler.removed(driver, device)
   if not devices or #devices == 0 then
     driver:cancel_timer()
   end
+  commands.handle_unsubs(driver, device)
 end
 
 return lifecycle_handler

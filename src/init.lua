@@ -6,6 +6,7 @@ local discovery = require('discovery')
 local commands = require('commands')
 local lifecycles = require('lifecycles')
 local config = require('config')
+local server = require('server')
 
 local function setup_timer(driver)
   local success = false
@@ -33,17 +34,27 @@ local function cancel_timer(driver, timer)
   end
 end
 
+local function cancel_subscriptions(driver)
+  local devices = driver:get_devices()
+  for _, device in ipairs(devices) do
+    commands.handle_unsubs(driver, device)
+  end
+end
+
 local function driver_lifecycle(driver, event)
   if('shutdown' == event) then
     driver:cancel_timer()
+    driver:cancel_subscriptions()
   end
 end
 
 local driver = Driver("Sonos LAN", {
     player_cache = {},
+    subscriptions = {},
     setup_timer = setup_timer,
     cancel_timer = cancel_timer,
     driver_lifecycle = driver_lifecycle,
+    cancel_subscriptions = cancel_subscriptions,
     discovery = discovery.start,
     lifecycle_handlers = lifecycles,
     supported_capabilities = {
@@ -81,7 +92,8 @@ local driver = Driver("Sonos LAN", {
       }, --[[
       [capabilities.switchLevel.ID] = {
         [capabilities.switchLevel.commands.setLevel.NAME] = commands.handle_set_track,
-      },]]
+      },
+      --]]
       [capabilities.mediaPlayback.ID] = {
         [capabilities.mediaPlayback.commands.play.NAME] = commands.handle_track_command,
         [capabilities.mediaPlayback.commands.pause.NAME] = commands.handle_track_command,
@@ -110,6 +122,7 @@ local driver = Driver("Sonos LAN", {
     }
   })
 
+server.start(driver)
 
 --------------------
 -- Initialize Driver
