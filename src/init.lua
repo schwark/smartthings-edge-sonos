@@ -93,6 +93,10 @@ local driver = Driver("Sonos LAN", {
       [capabilities.switchLevel.ID] = {
         [capabilities.switchLevel.commands.setLevel.NAME] = commands.handle_set_track,
       },
+      [capabilities.audioStream.ID] = {
+        [capabilities.audioStream.commands.startAudio.NAME] = commands.handle_track_command,
+        [capabilities.audioStream.commands.stopAudio.NAME] = commands.handle_track_command,
+      },
       --]]
       [capabilities.mediaPlayback.ID] = {
         [capabilities.mediaPlayback.commands.play.NAME] = commands.handle_track_command,
@@ -111,10 +115,6 @@ local driver = Driver("Sonos LAN", {
       [capabilities.mediaTrackControl.ID] = {
         [capabilities.mediaTrackControl.commands.nextTrack.NAME] = commands.handle_track_nav,
         [capabilities.mediaTrackControl.commands.previousTrack.NAME] = commands.handle_track_nav,
-      },
-      [capabilities.audioStream.ID] = {
-        [capabilities.audioStream.commands.startAudio.NAME] = commands.handle_track_command,
-        [capabilities.audioStream.commands.stopAudio.NAME] = commands.handle_track_command,
       },
       [capabilities.refresh.ID] = {
         [capabilities.refresh.commands.refresh.NAME] = commands.handle_refresh,

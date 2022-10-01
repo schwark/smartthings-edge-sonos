@@ -221,8 +221,19 @@ function M.get_instance()
     return _instance
 end
 
+-- SSDP Response parser
+local function parse_ssdp(data)
+    local res = {}
+    res.status = data:sub(0, data:find('\r\n'))
+    for k, v in data:gmatch('([%w%-%.]+):[%s]+([%w%+%-%:%.; /=_"]+)') do
+      res[k:lower()] = v
+    end
+    return res
+end
 
-local function get_config(ip)
+function M:init_player(ip)
+    log.info('init player for '..ip)
+
     local res = {}
     local url = 'http://'..ip..':'..config.SONOS_HTTP_PORT..'/xml/group_description.xml'
     log.debug('getting config '..url)
@@ -239,28 +250,12 @@ local function get_config(ip)
         xml_parser:parse(table.concat(res))
 
         -- Device metadata
-        return xmlres.root.root.device
+        local meta = xmlres.root.root.device
+        if meta and type(meta.friendlyName) == 'string' and meta.friendlyName and "" ~= meta.friendlyName then
+            return {ip=ip, id=meta.UDN:gsub('uuid:',''), name=meta.friendlyName}                   
+        end
     else
         log.error(status)
-    end
-end
-
--- SSDP Response parser
-local function parse_ssdp(data)
-    local res = {}
-    res.status = data:sub(0, data:find('\r\n'))
-    for k, v in data:gmatch('([%w%-%.]+):[%s]+([%w%+%-%:%.; /=_"]+)') do
-      res[k:lower()] = v
-    end
-    return res
-end
-
-function M:init_player(ip)
-    log.info('init player for '..ip)
-    local meta = get_config(ip)
-    --log.debug("meta for "..ip.." is "..utils.stringify_table(meta))
-    if meta and type(meta.friendlyName) == 'string' and meta.friendlyName and "" ~= meta.friendlyName then
-        return {ip=ip, id=meta.UDN:gsub('uuid:',''), name=meta.friendlyName}                   
     end
     return nil
 end
@@ -667,23 +662,23 @@ local function clean_name(name)
     return result
 end
 
-function M:find_media_by_field(pname, field)
-    local plist = nil
-    pname = clean_name(pname)
+function M:find_media_by_fields(pname, fields)
+    if type(fields) ~= 'table' then fields = {fields} end
+    local cname = clean_name(pname)
     for _, list in ipairs({self.playlists, self.favorites}) do
         --log.debug("searching "..utils.stringify_table(list))
         for i, item in ipairs(list) do
             log.debug("searching "..item.title.." for "..pname)
-            if clean_name(item[field]) == pname then
-                log.info("found media "..item.title)
-                plist = item
-                break
+            for j, field in ipairs(fields) do
+                if clean_name(item[field]) == cname then
+                    log.info("found media "..item.title..' for '..pname)
+                    return item
+                end
             end
         end
-        if plist then break end
     end
-    if not plist then log.error("did not find "..pname) end
-    return plist
+    log.error("did not find "..pname)
+    return nil
 end
 
 function M:play_media_by_name(player, pname, replace)
@@ -696,15 +691,26 @@ function M:play_media_by_id(player, pid, replace)
     return self:play(player)
 end
 
+function M:play_media_by_any(player, pid, replace)
+    assert(self:set_media_by_any(player, pid, replace))
+    return self:play(player)
+end
+
 function M:set_media_by_name(player, pname, replace)
     if replace then self:clear_queue(player) end
-    local item = assert(self:find_media_by_field(pname, 'title'))
+    local item = assert(self:find_media_by_fields(pname, 'title'))
     return self:set_media(player, item)
 end
 
 function M:set_media_by_id(player, pid, replace)
     if replace then self:clear_queue(player) end
-    local item = assert(self:find_media_by_field(pid, 'id'))
+    local item = assert(self:find_media_by_fields(pid, 'id'))
+    return self:set_media(player, item)
+end
+
+function M:set_media_by_any(player, pid, replace)
+    if replace then self:clear_queue(player) end
+    local item = assert(self:find_media_by_fields(pid, {'id','title'}))
     return self:set_media(player, item)
 end
 

@@ -7,25 +7,25 @@ local M = {}
 --@param attrTable table from where the _attr field will be got
 --@return a XML String representation of the tag attributes
 local function attrToXml(attrTable)
-  local s = ""
-  attrTable = attrTable or {}
-  
-  for k, v in pairs(attrTable) do
-      s = s .. " " .. k .. "=" .. '"' .. v .. '"'
-  end
-  return s
+    local s = ""
+    attrTable = attrTable or {}
+
+    for k, v in pairs(attrTable) do
+        s = s .. " " .. k .. "=" .. '"' .. v .. '"'
+    end
+    return s
 end
 
 ---Gets the first key of a given table
 local function getFirstKey(tb)
-   if type(tb) == "table" then
-      for k, _ in pairs(tb) do
-          return k
-      end
-      return nil
-   end
+    if type(tb) == "table" then
+        for k, _ in pairs(tb) do
+            return k
+        end
+        return nil
+    end
 
-   return tb
+    return tb
 end
 
 --- Parses a given entry in a lua table
@@ -37,7 +37,7 @@ end
 -- @param fieldValue a field from the lua table to be recursively parsed to XML or a primitive value that will be enclosed in a tag name
 -- @param level a int value used to include indentation in the generated XML from the table key
 local function parseTableKeyToXml(xmltb, tagName, fieldValue, level)
-    local spaces = string.rep(' ', level*2)
+    local spaces = string.rep(' ', level * 2)
 
     local strValue, attrsStr = "", ""
     if type(fieldValue) == "table" then
@@ -45,13 +45,13 @@ local function parseTableKeyToXml(xmltb, tagName, fieldValue, level)
         fieldValue._attr = nil
         --If after removing the _attr field there is just one element inside it,
         --the tag was enclosing a single primitive value instead of other inner tags.
-        strValue = #fieldValue == 1 and spaces..tostring(fieldValue[1]) or M.toXml(fieldValue, tagName, level+1)
-        strValue = '\n'..strValue..'\n'..spaces
+        strValue = #fieldValue == 1 and spaces .. tostring(fieldValue[1]) or M.toXml(fieldValue, tagName, level + 1)
+        strValue = '\n' .. strValue .. '\n' .. spaces
     else
         strValue = tostring(fieldValue)
     end
 
-    table.insert(xmltb, spaces..'<'..tagName.. attrsStr ..'>'..strValue..'</'..tagName..'>')
+    table.insert(xmltb, spaces .. '<' .. tagName .. attrsStr .. '>' .. strValue .. '</' .. tagName .. '>')
 end
 
 ---Converts a Lua table to a XML String representation.
@@ -63,62 +63,62 @@ end
 --
 --@return a String representing the table content in XML
 function M.toXml(tb, tableName, level)
-  level = level or 1
-  local firstLevel = level
-  tableName = tableName or ''
-  local xmltb = (tableName ~= '' and level == 1) and {'<'..tableName..attrToXml(tb._attr)..'>'} or {}
-  tb._attr = nil
+    level = level or 1
+    local firstLevel = level
+    tableName = tableName or ''
+    local xmltb = (tableName ~= '' and level == 1) and { '<' .. tableName .. attrToXml(tb._attr) .. '>' } or {}
+    tb._attr = nil
 
-  for k, v in pairs(tb) do
-      if type(v) == 'table' then
-         -- If the key is a number, the given table is an array and the value is an element inside that array.
-         -- In this case, the name of the array is used as tag name for each element.
-         -- So, we are parsing an array of objects, not an array of primitives.
-         if type(k) == 'number' then
-            parseTableKeyToXml(xmltb, tableName, v, level)
-         else
-            level = level + 1
-            -- If the type of the first key of the value inside the table
-            -- is a number, it means we have a HashTable-like structure,
-            -- in this case with keys as strings and values as arrays.
-            if type(getFirstKey(v)) == 'number' then
-                for sub_k, sub_v in pairs(v) do
-                    if sub_k ~= '_attr' then
-                      local sub_v_with_attr = type(v._attr) == 'table' and { sub_v, _attr = v._attr } or sub_v
-                      parseTableKeyToXml(xmltb, k, sub_v_with_attr, level)
-                    end
-                end
+    for k, v in pairs(tb) do
+        if type(v) == 'table' then
+            -- If the key is a number, the given table is an array and the value is an element inside that array.
+            -- In this case, the name of the array is used as tag name for each element.
+            -- So, we are parsing an array of objects, not an array of primitives.
+            if type(k) == 'number' then
+                parseTableKeyToXml(xmltb, tableName, v, level)
             else
-               -- Otherwise, the "HashTable" values are objects
-               parseTableKeyToXml(xmltb, k, v, level)
+                level = level + 1
+                -- If the type of the first key of the value inside the table
+                -- is a number, it means we have a HashTable-like structure,
+                -- in this case with keys as strings and values as arrays.
+                if type(getFirstKey(v)) == 'number' then
+                    for sub_k, sub_v in pairs(v) do
+                        if sub_k ~= '_attr' then
+                            local sub_v_with_attr = type(v._attr) == 'table' and { sub_v, _attr = v._attr } or sub_v
+                            parseTableKeyToXml(xmltb, k, sub_v_with_attr, level)
+                        end
+                    end
+                else
+                    -- Otherwise, the "HashTable" values are objects
+                    parseTableKeyToXml(xmltb, k, v, level)
+                end
             end
-         end
-      else
-         -- When values are primitives:
-         -- If the type of the key is number, the value is an element from an array.
-         -- In this case, uses the array name as the tag name.
-         if type(k) == 'number' then
-            k = tableName
-         end
-         parseTableKeyToXml(xmltb, k, v, level)
-      end
-  end
+        else
+            -- When values are primitives:
+            -- If the type of the key is number, the value is an element from an array.
+            -- In this case, uses the array name as the tag name.
+            if type(k) == 'number' then
+                k = tableName
+            end
+            parseTableKeyToXml(xmltb, k, v, level)
+        end
+    end
 
-  if tableName ~= '' and firstLevel == 1 then
-      table.insert(xmltb, '</'..tableName..'>\n')
-  end
+    if tableName ~= '' and firstLevel == 1 then
+        table.insert(xmltb, '</' .. tableName .. '>\n')
+    end
 
-  return table.concat(xmltb, '\n')
+    return table.concat(xmltb, '\n')
 end
 
 function M.xml_decode(str)
-    str = str:gsub('&lt;', '<' )
-    str = str:gsub('&gt;', '>' )
-    str = str:gsub('&quot;', '"' )
-    str = str:gsub('&apos;', "'" )
-    str = str:gsub('&#(%d+);', function(n) return string.char(n) end )
-    str = str:gsub('&#x(%d+);', function(n) return string.char(tonumber(n,16)) end )
-    str = str:gsub('&amp;', '&' ) -- Be sure to do this after all others
+    str = str:gsub('&lt;', '<')
+    str = str:gsub('&gt;', '>')
+    str = str:gsub('&quot;', '"')
+    str = str:gsub('&apos;', "'")
+    str = str:gsub('&#(%d+);', function(n) return string.char(n) end)
+    str = str:gsub('&#x(%d+);', function(n) return string.char(tonumber(n, 16)) end)
+    str = str:gsub('&amp;', '&') -- Be sure to do this after all others
     return str
 end
 
@@ -128,19 +128,66 @@ function M.xml_encode(str)
     end
     str = tostring(str)
     str = str:gsub('&', '&amp;') -- Be sure to do this before all others
-    str = str:gsub('<' ,'&lt;')
-    str = str:gsub('>' ,'&gt;')
-    str = str:gsub('"' ,'&quot;')
-    str = str:gsub("'" ,'&apos;')
+    str = str:gsub('<', '&lt;')
+    str = str:gsub('>', '&gt;')
+    str = str:gsub('"', '&quot;')
+    str = str:gsub("'", '&apos;')
     return str
 end
 
 function M.tight_xml(xml)
-    xml = xml:gsub('>%s+','>')
-    xml = xml:gsub('%s+<','<')
+    xml = xml:gsub('>%s+', '>')
+    xml = xml:gsub('%s+<', '<')
     return xml
 end
 
+local function parseargs(s)
+    local arg = {}
+    string.gsub(s, "([%-%w:_]+)=([\"'])(.-)%2", function(w, _, a)
+        arg[w] = a
+    end)
+    return arg
+end
 
+function M.collect(s)
+    local stack = {}
+    local top = {}
+    table.insert(stack, top)
+    local ni, c, label, xarg, empty
+    local i, j = 1, 1
+    while true do
+        ni, j, c, label, xarg, empty = string.find(s, "<(%/?)([%w:]+)(.-)(%/?)>", i)
+        if not ni then break end
+        local text = string.sub(s, i, ni - 1)
+        if not string.find(text, "^%s*$") then
+            table.insert(top, text)
+        end
+        if empty == "/" then -- empty element tag
+            table.insert(top, { label = label, xarg = parseargs(xarg), empty = 1 })
+        elseif c == "" then -- start tag
+            top = { label = label, xarg = parseargs(xarg) }
+            table.insert(stack, top) -- new level
+        else -- end tag
+            local toclose = table.remove(stack) -- remove top
+            top = stack[#stack]
+            if #stack < 1 then
+                error("nothing to close with " .. label)
+            end
+            if toclose.label ~= label then
+                error("trying to close " .. toclose.label .. " with " .. label)
+            end
+            table.insert(top, toclose)
+        end
+        i = j + 1
+    end
+    local text = string.sub(s, i)
+    if not string.find(text, "^%s*$") then
+        table.insert(stack[#stack], text)
+    end
+    if #stack > 1 then
+        error("unclosed " .. stack[#stack].label)
+    end
+    return stack[1]
+end
 
 return M

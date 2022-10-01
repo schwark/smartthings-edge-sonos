@@ -8,8 +8,6 @@ components:
     version: 1
   - id: audioTrackData
     version: 1
-  - id: audioStream
-    version: 1
   - id: mediaPresets
     version: 1
   - id: mediaTrackControl

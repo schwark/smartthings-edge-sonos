@@ -233,9 +233,9 @@ function command_handlers.handle_track_command(driver, device, command)
             log.info('current faves is ' .. (current_fave or "nil"))
             local success = false
             if current_fave and command.command == 'on' then
-                success = sonos:play_media_by_name(device.device_network_id, current_fave)
+                success = sonos:play_media_by_any(device.device_network_id, current_fave)
             elseif command.command == 'playPreset' and command.args.presetId then
-                success = sonos:play_media_by_id(device.device_network_id, command.args.presetId)
+                success = sonos:play_media_by_any(device.device_network_id, command.args.presetId)
             else
                 success = sonos:play(device.device_network_id)
             end
