@@ -218,9 +218,9 @@ local function set_field(result, path, value)
 end
 
 function M.parse_event(event, result, host, port)
-  log.debug('before fixing'..event)
+  --log.debug('before fixing'..event)
   event = fix_event_xml(event)
-  log.debug('after fixing'..event)
+  --log.debug('after fixing'..event)
   local xmlres = xml_handler:new()
   local xml_parser = xml2lua.parser(xmlres)
   xml_parser:parse(event)

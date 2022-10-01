@@ -380,7 +380,8 @@ function M:subscribe_events(player, type, callback, sid)
             sid = nil -- if renewal fails try again as new subscription
         end
         i = i + 1
-    until sid or i > 1 -- if renewal fails try again as new subscription
+        log.debug('sid is '..(sid or "nil")..' and i is '..i)
+    until sid or (i > 1) -- if renewal fails try again as new subscription
     return sid
   end
 

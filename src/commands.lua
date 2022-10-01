@@ -104,7 +104,7 @@ function command_handlers.handle_subs(driver, device)
         for i, type in ipairs(event_subs) do
             driver.subscriptions[device.device_network_id] = driver.subscriptions[device.device_network_id] or {}
             local current = driver.subscriptions[device.device_network_id] and driver.subscriptions[device.device_network_id][type]
-            log.info('current subscription is '..(current and tostring(current.sid) or "nil"))
+            log.info('current subscription is '..utils.stringify_table(current)..' and sid is '..(current and tostring(current.sid) or "non-existent"))
             if not current or (current.timeout and current.timeout - os.time() < config.SUBSCRIPTION_TIME/10) then
                 local sid = sonos:subscribe_events(device.device_network_id, type, callback, current and current.sid or nil)
                 if sid then
@@ -139,7 +139,7 @@ end
 function command_handlers.handle_init(driver, device)
     command_handlers.handle_subs(driver, device)
     device.thread:call_on_schedule(
-        config.SUBSCRIPTION_TIME,
+        config.SUBSCRIPTION_TIME-10,
         function ()
             return command_handlers.handle_subs(driver, device)
         end,
