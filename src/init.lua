@@ -82,9 +82,9 @@ local driver = Driver("Sonos LAN", {
         [capabilities.audioStream.commands.stopAudio.NAME] = commands.handle_track_command,
       },
       [capabilities.audioNotification.ID] = {
-        [capabilities.audioNotification.commands.playTrack.NAME] = commands.handle_track_command,
-        [capabilities.audioNotification.commands.playTrackAndRestore.NAME] = commands.handle_track_command,
-        [capabilities.audioNotification.commands.playTrackAndResume.NAME] = commands.handle_track_command,
+        [capabilities.audioNotification.commands.playTrack.NAME] = commands.handle_notification_command,
+        [capabilities.audioNotification.commands.playTrackAndRestore.NAME] = commands.handle_notification_command,
+        [capabilities.audioNotification.commands.playTrackAndResume.NAME] = commands.handle_notification_command,
       }, 
       [capabilities.switch.ID] = {
         [capabilities.switch.commands.on.NAME] = commands.handle_track_command,

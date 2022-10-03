@@ -1,7 +1,10 @@
---local socket = require('socket')
 local cosock = require "cosock"
 local socket = cosock.socket
 local http = cosock.asyncify "socket.http"
+--[[
+local socket = require('socket')
+local http = require('socket.http')
+--]]
 
 local utils = require("st.utils")
 local ltn12 = require('ltn12')
@@ -13,6 +16,20 @@ local log = require "log"
 local config = require('config')
 local xmlutil = require('xmlutil')
 local metadata = require('sonos.metadata')
+
+local char_to_hex = function(c)
+    return string.format("%%%02X", string.byte(c))
+end
+  
+local function url_encode(url)
+    if url == nil then
+        return
+    end
+    url = url:gsub("\n", "\r\n")
+    url = url:gsub("([^%w ])", char_to_hex)
+    url = url:gsub(" ", "+")
+    return url
+end
 
 local function get_cached(cache, var)
     --[[
@@ -579,10 +596,6 @@ function M:playback_cmd(player, cmd)
     return self:cmd(player, cmd) and true or false
 end
 
-function M:mute_cmd(player, state)
-    return self:cmd(player, 'SetGroupMute', {DesiredMute = state and true or false}) and true or false
-end
-
 function M:play(player)
     return self:playback_cmd(player, 'Play')
 end
@@ -608,12 +621,19 @@ function M:get_mute(player)
     return result and result.CurrentMute or nil
 end
 
+function M:set_mute(player, state)
+    state = (type(state) == 'string' and '1' == state) 
+            or (type(state) == 'number' and 1 == state) 
+            or (type(state) == 'boolean' and state) or false
+    return self:cmd(player, 'SetGroupMute', {DesiredMute = state and true or false}) and true or false
+end
+
 function M:mute(player)
-    return self:mute_cmd(player, true)
+    return self:set_mute(player, true)
 end
 
 function M:unmute(player)
-    return self:mute_cmd(player, false)
+    return self:set_mute(player, false)
 end
 
 function M:get_volume(player) 
@@ -714,7 +734,7 @@ function M:set_media_by_any(player, pid, replace)
     return self:set_media(player, item)
 end
 
-function M:whats_playing(player)
+function M:whats_playing(player, raw)
     local result = nil
     local response = self:cmd(player, 'GetPositionInfo')
     if response then
@@ -725,11 +745,11 @@ function M:whats_playing(player)
             result = result[1]
             result.num = response.Track and tonumber(response.Track)
             if not result.duration then
-                result.duration = response.TrackDuration
+                result.duration = metadata.duration_in_seconds(response.TrackDuration)
             end
             result.metadata = response.TrackMetaData
             result.position = metadata.duration_in_seconds(response.RelTime)
-            if result.title:match('preroll') then
+            if result.title and result.title:match('preroll') and not raw then
                 result.title = 'Pre-Roll Advertisement'
                 result.album = 'Advertising'
                 result.artist = 'Advertiser'
@@ -743,6 +763,14 @@ function M:whats_playing(player)
         result.num_tracks = response.NrTracks and tonumber(response.NrTracks)
     end
     return result
+end
+
+function M:seek_track(player, track)
+    return self:cmd(player, 'Seek', {Unit='TRACK_NR', Target=track})
+end
+
+function M:seek_position(player, position)
+    return self:cmd(player, 'Seek', {Unit='REL_TIME', Target=metadata.duration_in_hms(position)})
 end
 
 function M:get_play_state(player)
@@ -777,15 +805,130 @@ function M:set_play_mode(player, shuffle, rpt, all)
     return self:cmd(player, 'SetPlayMode', {NewPlayMode = mode}) and true or false
 end
 
-function M:get_state(player)
+function M:get_state(player, raw)
     local result = {}
-    result.playing = self:whats_playing(player)
+    result.playing = self:whats_playing(player, raw)
     result.mute = self:get_mute(player)
     result.volume = self:get_volume(player)
     result.state = self:get_play_state(player)
     result.shuffle, result.rpt, result.all = self:get_play_mode(player)
     return result
 end
+
+function M:restore_state(player, to_state)
+    if to_state.volume then
+        self:set_volume(player, to_state.volume)
+    end
+    if to_state.mute ~= nil then
+        self:set_mute(player, to_state.mute)
+    end
+    --[[
+    if to_state.shuffle ~= nil or to_state.rpt ~= nil then
+        self:set_play_mode(player, to_state.shuffle, to_state.rpt, to_state.all)
+    end
+    --]]
+    if to_state.playing and to_state.playing.uri then
+        self:set_uri(player, to_state.playing.uri, to_state.playing.metadata or "")
+        if to_state.playing.num > 1 and to_state.playing.num_tracks > 1 then
+            self:seek_track(player,to_state.playing.num)
+        end
+        if not metadata.is_radio(to_state.playing.uri) and to_state.playing.position and to_state.playing.position > 0 
+            and to_state.playing.duration and to_state.playing.duration > 0 then
+            self:seek_position(player, to_state.playing.position)
+        end
+    end
+    if to_state.state == 'PLAYING' or to_state.state == 'TRANSITIONING' then
+        self:play(player)
+    end
+end
+
+local languages = {
+    english    = "en",
+	englishuk  = "en-UK",
+	englishau  = "en-AU",
+	japanese   = "ja",
+	german     = "de",
+	spanish    = "es",
+	russian    = "ru",
+	arabic     = "ar",
+	bengali    = "bn",
+	czech      = "cs",
+	danish     = "da",
+	dutch      = "nl",
+	finnish    = "fi",
+	greek      = "el",
+	hindi      = "hi",
+	hungarian  = "hu",
+	indonesian = "id",
+	khmer      = "km",
+	latin      = "la",
+	italian    = "it",
+	norwegian  = "no",
+	polish     = "pl",
+	slovak     = "sk",
+	swedish    = "sv",
+	thai       = "th",
+	turkish    = "tr",
+	ukrainian  = "uk",
+	vietnamese = "vi",
+	afrikaans  = "af",
+	bulgarian  = "bg",
+	catalan    = "ca",
+	welsh      = "cy",
+	estonian   = "et",
+	french     = "fr",
+	gujarati   = "gu",
+	icelandic  = "is",
+	javanese   = "jv",
+	kannada    = "kn",
+	korean     = "ko",
+	latvian    = "lv",
+	malayalam  = "ml",
+	marathi    = "mr",
+	malay      = "ms",
+	nepali     = "ne",
+	portuguese = "pt",
+	romanian   = "ro",
+	sinhala    = "si",
+	serbian    = "sr",
+	sundanese  = "su",
+	tamil      = "ta",
+	telugu     = "te",
+	tagalog    = "tl",
+	urdu       = "ur",
+	chinese    = "zh",
+	swahili    = "sw",
+	albanian   = "sq",
+	burmese    = "my",
+	macedonian = "mk",
+	armenian   = "hy",
+	croatian   = "hr",
+	esperanto  = "eo",
+	bosnian    = "bs",
+}
+
+function M:get_tts_url(text, lang)
+    lang = (lang and string.len(lang) > 2 and languages[lang:lower()]) or lang or 'en'
+    return 'http://translate.google.com/translate_tts?ie=UTF-8&total=1&idx=0&textlen=32&client=tw-ob&q=%(text)s&tl=%(lang)s&format=.mp3' % {text = url_encode(text), lang = lang}
+end
+
+function M:play_notification(player, media, level, lang)
+    media = type(media) == 'string' and {
+        uri = (media:match(':') and media) -- already a URI
+              or M:get_tts_url(media, lang), -- text - convert to TTS url
+        upnp_class = 'object.item.audioItem.musicTrack'}
+        or (media.uri and media) -- already a media table
+        or nil -- unsupported media
+    if media then
+        media.metadata = media.metadata or metadata.track_metadata(media, true)
+        local current_state = M:get_state(player, true)
+        M:set_uri(player, media.uri, media.metadata)
+        if level then M:set_volume(player, tonumber(level)) end
+        M:play(player)
+        socket.sleep(5)
+        M:restore_state(player, current_state)            
+    end
+ end
 
 function M:update(cache, force)
     self:find_players(cache, force)

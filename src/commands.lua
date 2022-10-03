@@ -93,11 +93,22 @@ function command_handlers.handle_added(driver, device)
     device:emit_event(capabilities.mediaPlayback.supportedPlaybackCommands({ 'play', 'stop', 'pause' }))
 end
 
+function command_handlers.handle_notification_command(driver, device, command)
+    log.info('handling notification')
+    local sonos = command_handlers.get_sonos(driver, device)
+    if sonos then
+        sonos:play_notification(device.device_network_id, command.args.uri, command.args.level)
+    end
+end
+
 function command_handlers.handle_subs(driver, device)
+    log.info('handling subscriptions...')
     local sonos = command_handlers.get_sonos(driver, device)
     if sonos then
         for timer in pairs(device.thread.timers) do
-            device.thread:cancel_timer(timer)
+            if 'subscription timer' ~= timer.name then                
+                device.thread:cancel_timer(timer)
+            end
         end
         local event_subs = {'AVTransport', 'GroupRenderingControl'}
         local callback = 'http://%(host)s:%(port)s/' % {host = find_hub_ip(driver), port = driver.server.port}
@@ -143,7 +154,7 @@ function command_handlers.handle_init(driver, device)
         function ()
             return command_handlers.handle_subs(driver, device)
         end,
-        'Refresh schedule')
+        'subscription timer')
 end
 
 function command_handlers.get_sonos(driver, device)

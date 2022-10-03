@@ -180,6 +180,14 @@ function M.duration_in_seconds(str)
   return seconds and tonumber(hours) * 60 * 60 + tonumber(minutes) * 60 + tonumber(seconds)
 end
 
+function M.duration_in_hms(time)
+  if type(time) ~= 'number' then return nil end
+  local hours = math.floor((time % 86400)/3600)
+  local minutes = math.floor((time % 3600)/60)
+  local seconds = math.floor(time % 60)
+  return string.format("%02d:%02d:%02d",hours,minutes,seconds)
+end
+
 function M.to_int(str)
   return tonumber(str)
 end
@@ -382,17 +390,17 @@ function M.track_metadata(track, includeResource, cdudn)
   local metadata = '<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/" xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">'
   local parent_attr = track.parentid and ' parentID="' .. track.parentid .. '"' or ''
   metadata = metadata ..
-      '<item id="%(itemId)s" restricted="true"%(parent_attr)s>' % { itemId = itemId, parent_attr = parent_attr }
+      '<item id="%(itemId)s" restricted="true"%(parentattr)s>' % { itemId = itemId, parentattr = parent_attr }
   if (includeResource) then metadata = metadata ..
         '<res protocolInfo="%(proto)s" duration="%(duration)s">%(uri)s</res>' %
-        { proto = protocolInfo, duration = track.duration, uri = track.uri }
+        { proto = protocolInfo, duration = (track.duration or ''), uri = xmlutil.xml_encode(track.uri) }
   end
   if (track.art) then metadata = metadata .. '<upnp:albumArtURI>%(art)s</upnp:albumArtURI>' % { art = track.art } end
   if (track.title) then metadata = metadata .. '<dc:title>%(title)s</dc:title>' % { title = track.title } end
   if (track.artist) then metadata = metadata .. '<dc:creator>%(artist)s</dc:creator>' % { artist = track.artist } end
   if (track.album) then metadata = metadata .. '<upnp:album>%(album)s</upnp:album>' % { album = track.album } end
   if (track.upnp_class) then metadata = metadata ..
-        '<upnp:class>%(upnp_class)s</upnp:class>' % { upnp_class = track.upnp_class }
+        '<upnp:class>%(upnpclass)s</upnp:class>' % { upnpclass = track.upnp_class }
   end
   if track.metadata then
     metadata = metadata .. '<r:resMD>'..xmlutil.xml_encode(track.metadata)..'</r:resMD>'
@@ -691,7 +699,7 @@ function M.guess_track(trackUri, spotifyRegion)
     return apple_metadata(parts[2], parts[3])
   end
 
-  if(#parts == 3 and parts[1] == 'hls-radio' or parts[3]:match('m3u8')) then
+  if(#parts == 3 and (parts[1] == 'hls-radio' or parts[3]:match('m3u8'))) then
     track.upnp_class = 'object.item.audioItem.audioBroadcast'
     track.title = parts[3]:match('([%w%-]+)%.org') or parts[3]:match('([%w%-]+)%.com') or 'Some radio station'
     track.id = '10092020_'..(track.title or 'radio') -- Add station ID from url (regex?)
