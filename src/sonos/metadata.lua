@@ -312,6 +312,7 @@ function M.parse_didl(didl, host, port)
   if not result_handler.root or not result_handler.root['DIDL-Lite'] then return nil end
 
   local parsed_items = result_handler.root['DIDL-Lite'].item or result_handler.root['DIDL-Lite'].container
+  if not parsed_items then return nil end
   if not parsed_items[1] then parsed_items = { parsed_items } end
 
   for _, didl_item in ipairs(parsed_items) do
