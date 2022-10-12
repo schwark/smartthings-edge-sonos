@@ -2,7 +2,6 @@ local log = require "log"
 local capabilities = require "st.capabilities"
 local config = require("config")
 local Sonos = require('sonos.soap')
-local math = require('math')
 local utils = require('st.utils')
 local cosock = require "cosock"
 local socket = cosock.socket
