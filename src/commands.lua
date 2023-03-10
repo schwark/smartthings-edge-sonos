@@ -104,11 +104,13 @@ function command_handlers.handle_subs(driver, device)
     log.info('handling subscriptions...')
     local sonos = command_handlers.get_sonos(driver, device)
     if sonos then
+        --[[
         for timer in pairs(device.thread.timers) do
             if 'subscription timer' ~= timer.name then                
                 device.thread:cancel_timer(timer)
             end
         end
+        ]]
         local event_subs = {'AVTransport', 'GroupRenderingControl'}
         local callback = 'http://%(host)s:%(port)s/' % {host = find_hub_ip(driver), port = driver.server.port}
         for i, type in ipairs(event_subs) do
